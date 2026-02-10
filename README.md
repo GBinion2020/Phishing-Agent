@@ -1,4 +1,4 @@
-# Phishing Triage Agent
+# Phishing Triage Agent (IN DEV)
 
 Evidence-first, deterministic phishing triage from a single `.eml` file, with an agentic investigation loop and outputs that are designed to be reused across CLI, REST API, and MCP adapters.
 
