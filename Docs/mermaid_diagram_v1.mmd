@@ -1,0 +1,97 @@
+flowchart TD
+  %% =========================
+  %% ENTRY / ADAPTERS
+  %% =========================
+  subgraph ADAPTERS[Adapters]
+    CLI[CLI: phishscan analyze]
+    API[REST API: POST /analyze]
+    MCP[MCP Tool: analyze_email]
+  end
+
+  CLI --> INGEST
+  API --> INGEST
+  MCP --> INGEST
+
+  %% =========================
+  %% INGEST + CASE MGMT
+  %% =========================
+  subgraph INGEST["Ingest & Case Management"]
+    I1[Read input .eml bytes]
+    I2["CaseManager: create case_id + folders"]
+    I3[Write input/message.eml]
+    I4["Telemetry: start trace + budgets"]
+  end
+
+  %% =========================
+  %% PARSE / NORMALIZE
+  %% =========================
+  subgraph PARSE["Parse & Normalize"]
+    P1["EmailParser: headers + MIME tree"]
+    P2["Robust MIME decode + charset normalize"]
+    P3["Header canonicalization + Received parsing"]
+    P4["Entity extraction: urls/domains/ips/emails"]
+    P5["Entity dedup + contextual linking"]
+    P6["Attachment metadata + hashes + static strings/urls"]
+    P7["Schema validation: Envelope JSON"]
+    P8[Write artifacts/envelope.json]
+  end
+
+  %% =========================
+  %% SIGNALS + PLAYBOOKS
+  %% =========================
+  subgraph SIGNALS["Signals & Playbooks"]
+    S1["LLM Signal Generator<br/>bounded template true/false/unknown"]
+    S2[Validate signals.json against template schema]
+    S3["PlaybookSelector<br/>rules: signals -> playbooks"]
+    S4["Write artifacts/signals.json + playbooks/"]
+  end
+
+  %% =========================
+  %% INVESTIGATION (AGENTIC)
+  %% =========================
+  subgraph INVEST["Investigation Controller (Agentic Loop)"]
+    A1["Baseline Score: heuristics + signals"]
+    A2["Planner LLM<br/>select next tool steps"]
+    A3["Policy Gate<br/>allowlist + budgets + redaction"]
+    A4[ToolRouter executes tool]
+    A5[EvidenceStore append-only evidence_log.jsonl]
+    A6[Score Update + Stop Check]
+  end
+
+  %% Tools
+  subgraph TOOLS[Whitelisted Tools]
+    T1["DNS Resolve / MX / TXT"]
+    T2["Domain Intel / Age / Registrar"]
+    T3["URL Normalize + Redirect Expansion (safe)"]
+    T4[URL Reputation Connector]
+    T5["Attachment Static Analysis<br/>(PDF/Office URL extract, macro flags)"]
+    T6["Lookalike / Homoglyph Detector"]
+  end
+
+  %% =========================
+  %% VERDICT + REPORT
+  %% =========================
+  subgraph DECIDE["Verdict & Reporting"]
+    V1["VerdictEngine<br/>risk_score + verdict + reasons[evidence_ids]"]
+    V2[Write artifacts/verdict.json]
+    R1["Strict LLM Analyst<br/>report from evidence only"]
+    R2["Write analyst_report.json + analyst_report.md"]
+    R3["Export iocs.json + hunt queries"]
+  end
+
+  %% =========================
+  %% OUTPUT
+  %% =========================
+  subgraph OUT[Outputs]
+    O1["CLI: one-line verdict"]
+    O2["CLI: JSON artifacts for automation"]
+    O3["API/MCP: return Verdict + Report + artifact refs"]
+  end
+
+  INGEST --> PARSE
+  PARSE --> SIGNALS
+  SIGNALS --> INVEST
+  INVEST -->|tool calls| TOOLS
+  TOOLS --> INVEST
+  INVEST --> DECIDE
+  DECIDE --> OUT
