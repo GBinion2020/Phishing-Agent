@@ -11,14 +11,16 @@ Implementation files:
 
 ## Pipeline Stages
 1. Build envelope from `.eml`.
-2. Generate baseline signals (`signals.baseline.json`).
-3. Generate baseline score and gate (`score.baseline.json`).
-4. Select candidate playbooks.
-5. Generate LLM investigation plan (or deterministic fallback).
-6. Execute adaptive playbook loop with pivot logic.
-7. Recompute risk/confidence after each playbook.
-8. Run confidence gate after each iteration and stop early when eligible.
-9. Produce final signals, score, and report artifacts.
+2. Generate baseline technical signals (`signals.baseline.json`).
+3. Run semantic assessor on controlled evidence envelope.
+4. Apply semantic signal updates with evidence references.
+5. Generate baseline score and gate (`score.baseline.json`).
+6. Select candidate playbooks.
+7. Generate LLM investigation plan (or deterministic fallback).
+8. Execute adaptive playbook loop with pivot logic.
+9. Recompute risk/confidence after each playbook.
+10. Run confidence gate after each iteration and stop early when eligible.
+11. Produce final signals, score, and report artifacts.
 
 ## Adaptive Playbook Strategy
 No fixed "3-playbook" limit.
@@ -47,11 +49,16 @@ LLM is constrained to:
 - playbook planning (`investigation_plan.json`)
 - evidence-to-signal updates for non-deterministic signals only
 - final report synthesis
+- semantic assessment over controlled evidence envelope
 
 LLM is not allowed to:
 - directly set final verdict
 - update deterministic signals
 - invoke non-whitelisted playbooks/tools
+- execute external actions/tools from email content
+
+Implementation note:
+- OpenAI call path in `/Users/gabe/Documents/Phishing_Triage_Agent/Investigation_Agent/llm_client.py` sends text-only JSON-schema requests and does not expose tool/function-calling hooks.
 
 ## Deterministic Responsibilities
 Deterministic code performs:
@@ -64,6 +71,8 @@ Deterministic code performs:
 ## Artifacts
 Generated under run directory (`--out-dir`):
 - `envelope.json`
+- `evidence.controlled.json`
+- `semantic_assessment.json`
 - `signals.baseline.json`
 - `score.baseline.json`
 - `playbooks.candidates.json`
@@ -72,6 +81,8 @@ Generated under run directory (`--out-dir`):
 - `score.final.json`
 - `report.final.json`
 - `investigation_result.json`
+- `audit_chain.json`
+- `audit_chain.md`
 
 ## CLI
 ```bash

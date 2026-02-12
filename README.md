@@ -39,10 +39,12 @@ Artifacts:
 ## Component Docs
 - Normalization pipeline: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/normalization/normalization_pipeline.md`
 - Signal engine pipeline: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/signals/signal_engine_pipeline.md`
+- Semantic signal assessor: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/signals/semantic_signal_assessor.md`
 - Scoring engine pipeline: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/scoring/scoring_engine_pipeline.md`
 - Playbook pipeline: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/playbooks/playbook_pipeline.md`
 - MCP tooling and cache: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/mcp/mcp_tooling_and_cache.md`
 - Investigation pipeline: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/investigation/investigation_agent_pipeline.md`
+- Audit chain: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/investigation/audit_chain.md`
 - Prompt contracts: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/prompts/prompt_contracts.md`
 - Confidence gate and pivot: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/gating/confidence_gate_and_pivot.md`
 

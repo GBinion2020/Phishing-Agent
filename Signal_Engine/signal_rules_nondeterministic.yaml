@@ -19,6 +19,13 @@
     {"id": "behavior.user_not_previous_correspondent", "required_tools": ["mailbox_history"]},
     {"id": "behavior.multiple_similar_messages_detected", "required_tools": ["campaign_clustering"]},
     {"id": "evasion.domain_fast_flux_behavior", "required_tools": ["dns_history"]},
-    {"id": "evasion.cdn_abuse_detected", "required_tools": ["cdn_fronting_detector"]}
+    {"id": "evasion.cdn_abuse_detected", "required_tools": ["cdn_fronting_detector"]},
+    {"id": "semantic.credential_theft_intent", "required_tools": ["llm_semantic_assessor"]},
+    {"id": "semantic.coercive_language", "required_tools": ["llm_semantic_assessor"]},
+    {"id": "semantic.payment_diversion_intent", "required_tools": ["llm_semantic_assessor"]},
+    {"id": "semantic.impersonation_narrative", "required_tools": ["llm_semantic_assessor"]},
+    {"id": "semantic.body_url_intent_mismatch", "required_tools": ["llm_semantic_assessor"]},
+    {"id": "semantic.social_engineering_intent", "required_tools": ["llm_semantic_assessor"]},
+    {"id": "semantic.prompt_injection_attempt", "required_tools": ["llm_semantic_assessor"]}
   ]
 }

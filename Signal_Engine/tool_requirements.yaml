@@ -17,6 +17,14 @@
     "mailbox_history": {"description": "Whether sender has prior recipient correspondence", "output_contract": {"previous_contact": "boolean"}},
     "campaign_clustering": {"description": "Cross-tenant similar message clustering", "output_contract": {"clustered": "boolean", "cluster_size": "integer"}},
     "dns_history": {"description": "DNS volatility for fast-flux checks", "output_contract": {"fast_flux": "boolean"}},
-    "cdn_fronting_detector": {"description": "Detects domain fronting/CDN abuse", "output_contract": {"abuse_detected": "boolean"}}
+    "cdn_fronting_detector": {"description": "Detects domain fronting/CDN abuse", "output_contract": {"abuse_detected": "boolean"}},
+    "llm_semantic_assessor": {
+      "description": "LLM semantic analysis over controlled evidence envelope (no tool execution capability)",
+      "output_contract": {
+        "assessments": "array",
+        "prompt_injection_detected": "boolean",
+        "prompt_injection_indicators": "array"
+      }
+    }
   }
 }

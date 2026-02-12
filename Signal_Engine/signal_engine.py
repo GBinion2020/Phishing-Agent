@@ -57,6 +57,18 @@ PAYMENT_KWS = {"invoice", "payment", "wire transfer", "bank details", "remittanc
 SUSPENSION_KWS = {"suspended", "suspension", "locked", "deactivated", "disable your account"}
 GENERIC_GREETINGS = {"dear user", "dear customer", "dear valued customer", "hello user"}
 TYPO_MARKERS = {"passwrod", "verfy", "accunt", "immediatly", "suspenssion", "kindly do the needful"}
+KNOWN_LINK_WRAPPER_HOSTS = {
+    "nam11.safelinks.protection.outlook.com",
+    "safelinks.protection.outlook.com",
+    "urldefense.proofpoint.com",
+    "linkprotect.cudasvc.com",
+}
+KNOWN_RELAY_DOMAIN_HINTS = {
+    "outlook.com",
+    "microsoft.com",
+    "prod.outlook.com",
+    "exchange",
+}
 
 
 def _now_iso() -> str:
@@ -178,6 +190,20 @@ def identity_from_domain_mismatch_in_headers(envelope: dict[str, Any]) -> Signal
     if not from_domain or not candidates:
         return _signal("unknown", "Insufficient header domains to compare", ["message_metadata.message_id", "message_metadata.return_path"])
     mismatch = any(dom != from_domain for dom in candidates)
+    if mismatch:
+        auth = envelope.get("auth_summary", {})
+        auth_unknown = (
+            (auth.get("spf", {}).get("result") in {None, "unknown"})
+            and (auth.get("dmarc", {}).get("result") in {None, "unknown"})
+            and (len(auth.get("dkim", []) or []) == 0)
+        )
+        relay_like = any(any(hint in dom for hint in KNOWN_RELAY_DOMAIN_HINTS) for dom in candidates)
+        if relay_like and auth_unknown:
+            return _signal(
+                "unknown",
+                f"Header domain mismatch appears relay-related ({sorted(candidates)}) with unknown auth context",
+                ["message_metadata.from", "message_metadata.message_id", "auth_summary"],
+            )
     return _signal(
         "true" if mismatch else "false",
         f"From domain '{from_domain}' vs header domains {sorted(candidates)}",
@@ -305,6 +331,19 @@ def url_display_text_mismatch(envelope: dict[str, Any]) -> SignalResult:
         if "http" in clean_text or "www." in clean_text:
             href_host = (urlparse(href).hostname or "").lower()
             text_host = (urlparse(clean_text).hostname or "").lower()
+            if href_host in KNOWN_LINK_WRAPPER_HOSTS:
+                q = urlparse(href).query
+                wrapped_target = re.search(r"(?:^|[&?])url=([^&]+)", q, flags=re.IGNORECASE)
+                if wrapped_target:
+                    try:
+                        from urllib.parse import unquote
+
+                        decoded = unquote(wrapped_target.group(1))
+                        wrapped_host = (urlparse(decoded).hostname or "").lower()
+                    except Exception:
+                        wrapped_host = ""
+                    if wrapped_host and wrapped_host == text_host:
+                        continue
             if href_host and text_host and href_host != text_host:
                 return _signal("true", f"Anchor text host '{text_host}' differs from href host '{href_host}'", ["mime_parts.body_extraction.text_html"])
     return _signal("false", "No link text/href mismatch detected", ["mime_parts.body_extraction.text_html"])
@@ -314,6 +353,8 @@ def url_multiple_redirect_pattern_in_path(envelope: dict[str, Any]) -> SignalRes
     redirect_keys = {"url", "redirect", "next", "target", "dest", "continue"}
     for u in _urls(envelope):
         parsed = urlparse(u.get("normalized") or u.get("url") or "")
+        if (parsed.hostname or "").lower() in KNOWN_LINK_WRAPPER_HOSTS:
+            continue
         query = parsed.query.lower()
         hits = sum(1 for k in redirect_keys if f"{k}=" in query)
         if hits >= 1 and ("http%3a" in query or "https%3a" in query or "http://" in query or "https://" in query):
@@ -323,6 +364,9 @@ def url_multiple_redirect_pattern_in_path(envelope: dict[str, Any]) -> SignalRes
 
 def url_long_obfuscated_string(envelope: dict[str, Any]) -> SignalResult:
     for u in _urls(envelope):
+        host = (urlparse(u.get("normalized") or "").hostname or "").lower()
+        if host in KNOWN_LINK_WRAPPER_HOSTS:
+            continue
         candidate = f"{u.get('path', '')}?{urlparse(u.get('normalized') or '').query}"
         if len(candidate) > 120 and re.search(r"[A-Za-z0-9]{30,}", candidate):
             return _signal("true", "Long potentially obfuscated URL segment detected", [u.get("evidence_id", "entities.urls")])
@@ -391,8 +435,19 @@ def content_generic_greeting(envelope: dict[str, Any]) -> SignalResult:
 def content_brand_impersonation(envelope: dict[str, Any]) -> SignalResult:
     body = _body_text(envelope)
     from_domain = ((_msg(envelope).get("from") or {}).get("domain") or "").lower()
+    social_markers = (
+        content_credential_harvest_language(envelope)["value"] == "true"
+        or content_urgency_language(envelope)["value"] == "true"
+        or content_account_suspension_threat(envelope)["value"] == "true"
+    )
     for brand, legit_domain in BRAND_DOMAIN_MAP.items():
         if brand in body and legit_domain not in from_domain:
+            if not social_markers:
+                return _signal(
+                    "unknown",
+                    f"Brand mention '{brand}' without supporting coercive/credential cues",
+                    ["mime_parts.body_extraction", "message_metadata.from.domain"],
+                )
             return _signal("true", f"Body references '{brand}' while sender domain is '{from_domain}'", ["mime_parts.body_extraction", "message_metadata.from.domain"])
     return _signal("false", "No brand impersonation mismatch detected", ["mime_parts.body_extraction", "message_metadata.from.domain"])
 
@@ -460,7 +515,14 @@ def attachment_embedded_urls(envelope: dict[str, Any]) -> SignalResult:
 
 
 def infra_private_ip_in_received_chain(envelope: dict[str, Any]) -> SignalResult:
-    chain_text = "\n".join((hop.get("raw") or "") for hop in (_msg(envelope).get("received_chain") or []))
+    chain = _msg(envelope).get("received_chain") or []
+    chain_text = "\n".join((hop.get("raw") or "") for hop in chain)
+    if len(chain) <= 2:
+        return _signal("false", "Received chain too short to infer anomalous private IP behavior", ["message_metadata.received_chain"])
+    relay_context = any(
+        any(hint in str((hop.get("by") or "")).lower() for hint in ("outlook", "microsoft", "exchange", "google", "proofpoint"))
+        for hop in chain
+    )
     for ip_item in envelope.get("entities", {}).get("ips", []):
         ip_text = ip_item.get("ip")
         if not ip_text:
@@ -469,7 +531,7 @@ def infra_private_ip_in_received_chain(envelope: dict[str, Any]) -> SignalResult
             ip_obj = ipaddress.ip_address(ip_text)
         except ValueError:
             continue
-        if ip_obj.is_private and ip_text in chain_text:
+        if ip_obj.is_private and ip_text in chain_text and not relay_context:
             return _signal("true", f"Private IP appears in Received chain: {ip_text}", ["message_metadata.received_chain", "entities.ips"])
     return _signal("false", "No private IP found in Received chain", ["message_metadata.received_chain", "entities.ips"])
 

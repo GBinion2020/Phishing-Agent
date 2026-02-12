@@ -184,58 +184,6 @@
       }
     },
     {
-      "id": "phishtank_lookup",
-      "mcp_tool": "enrich_url_phishtank",
-      "provider": "PhishTank",
-      "base_url": "https://phishtank.org",
-      "auth_env_var": null,
-      "free_tier": true,
-      "ioc_types": ["url"],
-      "cache_ttl_seconds": 21600,
-      "input_schema": {
-        "type": "object",
-        "required": ["ioc_type", "value"],
-        "properties": {
-          "ioc_type": {"enum": ["url"]},
-          "value": {"type": "string", "min_length": 4}
-        }
-      },
-      "output_schema": {
-        "required": ["status", "malicious", "confidence"],
-        "properties": {
-          "status": {"enum": ["ok", "deferred", "error"]},
-          "malicious": {"type": "boolean"},
-          "confidence": {"type": "number"}
-        }
-      }
-    },
-    {
-      "id": "openphish_lookup",
-      "mcp_tool": "enrich_url_openphish",
-      "provider": "OpenPhish",
-      "base_url": "https://openphish.com",
-      "auth_env_var": null,
-      "free_tier": true,
-      "ioc_types": ["url", "domain"],
-      "cache_ttl_seconds": 21600,
-      "input_schema": {
-        "type": "object",
-        "required": ["ioc_type", "value"],
-        "properties": {
-          "ioc_type": {"enum": ["url", "domain"]},
-          "value": {"type": "string", "min_length": 4}
-        }
-      },
-      "output_schema": {
-        "required": ["status", "malicious", "confidence"],
-        "properties": {
-          "status": {"enum": ["ok", "deferred", "error"]},
-          "malicious": {"type": "boolean"},
-          "confidence": {"type": "number"}
-        }
-      }
-    },
-    {
       "id": "crtsh_lookup",
       "mcp_tool": "enrich_domain_crtsh",
       "provider": "crt.sh",

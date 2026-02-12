@@ -30,6 +30,11 @@ if str(ROOT / "MCP_Adapters") not in sys.path:
 
 from src.Ingestion.intake import build_envelope
 from Signal_Engine.signal_engine import run_signal_engine
+from Signal_Engine.semantic_signal_assessor import (
+    assess_semantic_signals,
+    build_controlled_evidence_envelope,
+    semantic_assessments_to_updates,
+)
 from Scoring_Engine.scoring_engine import score_signals
 from Playbooks.playbook_selector import select_playbooks
 from MCP_Adapters.ioc_cache import IOCCache
@@ -44,6 +49,7 @@ from Investigation_Agent.contracts import (
     validate_report,
     validate_signal_updates,
 )
+from Investigation_Agent.audit_chain import build_audit_chain, to_markdown
 from Investigation_Agent.env_utils import env_float, env_int, load_dotenv
 from Investigation_Agent.llm_client import LLMClient
 from Investigation_Agent.prompt_templates import (
@@ -57,7 +63,7 @@ from Investigation_Agent.prompt_templates import (
 
 
 TOOL_ALIAS_TO_MCP: dict[str, list[str]] = {
-    "url_reputation": ["virustotal_url", "urlscan_lookup", "openphish_lookup"],
+    "url_reputation": ["virustotal_url", "urlscan_lookup"],
     "whois_domain_age": ["icann_rdap_domain"],
     "hash_intel_lookup": ["virustotal_hash", "alienvault_otx"],
     "ip_reputation": ["abuseipdb_check", "virustotal_ip"],
@@ -300,11 +306,17 @@ def _map_tool_result_to_signal_updates(
             add("identity.domain_not_owned_by_org", "false" if owned else "true", f"domain ownership check owned={owned}")
 
     elif tool_alias == "whois_domain_age":
+        registered = output.get("registered")
         age_days = output.get("age_days")
         if isinstance(age_days, int):
-            value = "true" if age_days < 30 else "false"
-            add("identity.newly_registered_sender_domain", value, f"domain age days={age_days}")
-            add("url.domain_newly_registered", value, f"domain age days={age_days}")
+            if registered is False or age_days <= 0:
+                value = "unknown"
+                rationale = f"domain registration age unavailable (registered={registered}, age_days={age_days})"
+            else:
+                value = "true" if age_days < 30 else "false"
+                rationale = f"domain age days={age_days}"
+            add("identity.newly_registered_sender_domain", value, rationale)
+            add("url.domain_newly_registered", value, rationale)
 
     elif tool_alias == "brand_lookalike_detector":
         lookalike = output.get("is_lookalike")
@@ -539,11 +551,12 @@ def _llm_report(
     score_doc: dict[str, Any],
     iterations: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    if not llm.enabled:
+    def _fallback_report(note: str) -> dict[str, Any]:
         return {
             "executive_summary": (
                 f"Case {envelope.get('case_id')}: verdict={score_doc.get('verdict')} "
-                f"risk={score_doc.get('risk_score')} confidence={score_doc.get('confidence_score')}"
+                f"risk={score_doc.get('risk_score')} confidence={score_doc.get('confidence_score')} "
+                f"({note})"
             ),
             "key_indicators": [r.get("signal_id") for r in score_doc.get("reasons", [])[:6]],
             "recommended_actions": [
@@ -558,16 +571,22 @@ def _llm_report(
             ],
         }
 
+    if not llm.enabled:
+        return _fallback_report("LLM disabled")
+
     user_prompt = report_user_prompt(envelope, signals_doc, score_doc, iterations)
-    out = llm.call_json(
-        system_prompt=REPORT_SYSTEM_PROMPT,
-        user_prompt=user_prompt,
-        json_schema=REPORT_SCHEMA,
-        schema_name="investigation_report",
-        temperature=0.0,
-    )
-    validate_report(out)
-    return out
+    try:
+        out = llm.call_json(
+            system_prompt=REPORT_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            json_schema=REPORT_SCHEMA,
+            schema_name="investigation_report",
+            temperature=0.0,
+        )
+        validate_report(out)
+        return out
+    except Exception as exc:
+        return _fallback_report(f"LLM report fallback due to error: {exc}")
 
 
 
@@ -608,7 +627,7 @@ def _execute_playbook(
                         mock_output = synthesize_mock_output(mcp_tool, payload)
                         seed_cache(mcp_tool, payload, mock_output, registry, cache)
 
-                    routed = route_tool_call(mcp_tool, payload, registry, cache, live_call=False)
+                    routed = route_tool_call(mcp_tool, payload, registry, cache, live_call=(mode == "live"))
                     ev_idx += 1
                     evidence_id = f"ev_mcp_{ev_idx:04d}"
                     ev = {
@@ -685,8 +704,18 @@ def run_pipeline(eml_path: str, out_dir: str, mode: str = "mock") -> dict[str, A
         nondeterministic_rules=signal_nondet_rules,
         tool_results=None,
     )
-    score_doc = score_signals(signals_doc, scoring_cfg)
 
+    controlled_evidence = build_controlled_evidence_envelope(envelope)
+    semantic_doc = assess_semantic_signals(controlled_evidence, llm=llm)
+    semantic_updates = semantic_assessments_to_updates(semantic_doc)
+    _apply_signal_updates(signals_doc, semantic_updates)
+
+    baseline_signals = copy.deepcopy(signals_doc)
+    score_doc = score_signals(signals_doc, scoring_cfg)
+    baseline_score = copy.deepcopy(score_doc)
+
+    (out / "evidence.controlled.json").write_text(json.dumps(controlled_evidence, indent=2) + "\n", encoding="utf-8")
+    (out / "semantic_assessment.json").write_text(json.dumps(semantic_doc, indent=2) + "\n", encoding="utf-8")
     (out / "signals.baseline.json").write_text(json.dumps(signals_doc, indent=2) + "\n", encoding="utf-8")
     (out / "score.baseline.json").write_text(json.dumps(score_doc, indent=2) + "\n", encoding="utf-8")
 
@@ -848,6 +877,19 @@ def run_pipeline(eml_path: str, out_dir: str, mode: str = "mock") -> dict[str, A
     (out / "score.final.json").write_text(json.dumps(current_score, indent=2) + "\n", encoding="utf-8")
     (out / "report.final.json").write_text(json.dumps(final_report, indent=2) + "\n", encoding="utf-8")
     (out / "investigation_result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+
+    audit = build_audit_chain(
+        eml_path=eml_path,
+        envelope=envelope,
+        baseline_signals=baseline_signals,
+        semantic_doc=semantic_doc,
+        baseline_score=baseline_score,
+        candidates_doc=candidates_doc,
+        plan_doc=plan_doc,
+        result=result,
+    )
+    (out / "audit_chain.json").write_text(json.dumps(audit, indent=2) + "\n", encoding="utf-8")
+    (out / "audit_chain.md").write_text(to_markdown(audit), encoding="utf-8")
 
     return result
 

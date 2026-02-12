@@ -24,9 +24,16 @@ Configured in registry for staged integration:
 3. ICANN RDAP (domain registration)
 4. AbuseIPDB (IP reputation)
 5. AlienVault OTX (multi-IOC intel)
-6. PhishTank (URL phishing checks)
-7. OpenPhish (phishing URL feed)
-8. crt.sh (certificate transparency/domain context)
+6. crt.sh (certificate transparency/domain context)
+
+Deprecated from active registry:
+- PhishTank
+- OpenPhish
+
+Loss from deprecating these two feeds:
+- less cross-feed URL phishing confirmation coverage
+- fewer direct feed matches for known phishing URLs
+- slightly lower recall on newly listed phish URLs that appear in those feeds first
 
 ## Tool Registry Contract
 Each tool definition includes:

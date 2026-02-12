@@ -7,6 +7,13 @@ import os
 from pathlib import Path
 
 
+def _clean_env_value(val: str) -> str:
+    v = val.strip()
+    if len(v) >= 2 and ((v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'"))):
+        v = v[1:-1].strip()
+    return v
+
+
 def load_dotenv(path: str = ".env") -> None:
     p = Path(path)
     if not p.exists():
@@ -20,7 +27,7 @@ def load_dotenv(path: str = ".env") -> None:
             continue
         key, val = line.split("=", 1)
         key = key.strip()
-        val = val.strip()
+        val = _clean_env_value(val)
         if key and key not in os.environ:
             os.environ[key] = val
 

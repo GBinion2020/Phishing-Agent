@@ -88,3 +88,8 @@ python3 /Users/gabe/Documents/Phishing_Triage_Agent/Scoring_Engine/scoring_engin
 - Keep high-impact list small and stable.
 - Treat confidence penalties as safety controls, not risk controls.
 - Re-tune only against labeled corpora.
+
+Current anti-false-positive weight tuning:
+- reduced weight for wrapper-prone URL heuristics (`display_text_mismatch`, redirect-pattern, long-obfuscated-string)
+- reduced weight for relay-prone header/infrastructure heuristics (`from_domain_mismatch_in_headers`, `private_ip_in_received_chain`)
+- reduced standalone weight for `content.brand_impersonation` unless supported by other social-engineering indicators

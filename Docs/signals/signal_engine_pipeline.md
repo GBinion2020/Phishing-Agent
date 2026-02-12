@@ -31,6 +31,11 @@ Note: these files are JSON-compatible YAML so parsing does not require PyYAML.
 5. Emit strict bounded values: `true`, `false`, or `unknown`.
 6. Pass output to scoring engine and playbook selector for deterministic decisioning.
 
+Additional semantic stage:
+- LLM semantic assessor runs on a controlled evidence envelope.
+- Outputs bounded `semantic.*` signals with evidence references.
+- Semantic signals are merged before scoring.
+
 ## Deterministic Evaluation
 Deterministic evaluators inspect these envelope areas:
 - `message_metadata` for identity/header checks
@@ -38,6 +43,13 @@ Deterministic evaluators inspect these envelope areas:
 - `entities.urls/domains/emails/ips` for URL and infrastructure signals
 - `mime_parts.body_extraction` for content/evasion checks
 - `attachments` for static attachment indicators
+
+False-positive controls added:
+- known enterprise link wrappers (for example Outlook SafeLinks) are handled before URL mismatch scoring
+- redirect/obfuscation URL heuristics skip known link-wrapper hosts
+- header domain mismatch is downgraded when evidence suggests relay infrastructure with unknown auth
+- private-IP-in-Received signal is suppressed in likely enterprise relay contexts
+- brand-impersonation signal requires supporting coercive/credential context
 
 ## Non-Deterministic Evaluation
 Non-deterministic signals require connectors such as:

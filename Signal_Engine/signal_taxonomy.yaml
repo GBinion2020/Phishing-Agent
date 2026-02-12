@@ -69,6 +69,14 @@
     {"id": "evasion.zero_width_characters", "category": "evasion", "kind": "deterministic"},
     {"id": "evasion.homoglyph_substitution", "category": "evasion", "kind": "deterministic"},
     {"id": "evasion.domain_fast_flux_behavior", "category": "evasion", "kind": "non_deterministic"},
-    {"id": "evasion.cdn_abuse_detected", "category": "evasion", "kind": "non_deterministic"}
+    {"id": "evasion.cdn_abuse_detected", "category": "evasion", "kind": "non_deterministic"},
+
+    {"id": "semantic.credential_theft_intent", "category": "semantic", "kind": "non_deterministic"},
+    {"id": "semantic.coercive_language", "category": "semantic", "kind": "non_deterministic"},
+    {"id": "semantic.payment_diversion_intent", "category": "semantic", "kind": "non_deterministic"},
+    {"id": "semantic.impersonation_narrative", "category": "semantic", "kind": "non_deterministic"},
+    {"id": "semantic.body_url_intent_mismatch", "category": "semantic", "kind": "non_deterministic"},
+    {"id": "semantic.social_engineering_intent", "category": "semantic", "kind": "non_deterministic"},
+    {"id": "semantic.prompt_injection_attempt", "category": "semantic", "kind": "non_deterministic"}
   ]
 }
