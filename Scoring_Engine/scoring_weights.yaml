@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0",
+  "risk": {
+    "category_defaults": {
+      "identity": {"deterministic": 8, "non_deterministic": 10},
+      "header": {"deterministic": 4, "non_deterministic": 0},
+      "auth": {"deterministic": 10, "non_deterministic": 10},
+      "url": {"deterministic": 8, "non_deterministic": 12},
+      "content": {"deterministic": 6, "non_deterministic": 10},
+      "attachment": {"deterministic": 10, "non_deterministic": 14},
+      "infra": {"deterministic": 7, "non_deterministic": 11},
+      "behavior": {"deterministic": 3, "non_deterministic": 8},
+      "evasion": {"deterministic": 9, "non_deterministic": 12}
+    },
+    "signal_overrides": {
+      "auth.dmarc_fail": {"true_weight": 20},
+      "auth.spf_fail": {"true_weight": 14},
+      "auth.dkim_fail": {"true_weight": 14},
+      "auth.alignment_fail": {"true_weight": 18},
+      "identity.lookalike_domain_confirmed": {"true_weight": 24},
+      "url.reputation_malicious": {"true_weight": 28},
+      "url.redirect_chain_detected": {"true_weight": 12},
+      "url.ip_literal_used": {"true_weight": 12},
+      "content.credential_harvest_language": {"true_weight": 14},
+      "content.account_suspension_threat": {"true_weight": 10},
+      "attachment.hash_known_malicious": {"true_weight": 30},
+      "attachment.sandbox_behavior_malicious": {"true_weight": 30},
+      "attachment.suspicious_file_type": {"true_weight": 14},
+      "attachment.contains_macro_indicator": {"true_weight": 18},
+      "infra.sending_ip_reputation_bad": {"true_weight": 16},
+      "evasion.domain_fast_flux_behavior": {"true_weight": 18}
+    },
+    "high_impact_signals": [
+      "auth.dmarc_fail",
+      "auth.alignment_fail",
+      "identity.lookalike_domain_confirmed",
+      "url.reputation_malicious",
+      "attachment.hash_known_malicious",
+      "attachment.sandbox_behavior_malicious",
+      "infra.sending_ip_reputation_bad",
+      "evasion.domain_fast_flux_behavior"
+    ],
+    "max_score": 100,
+    "min_score": 0,
+    "verdict_thresholds": {
+      "benign_max": 20,
+      "phish_min": 75
+    }
+  },
+  "confidence": {
+    "base": 0.25,
+    "coverage_weight": 0.45,
+    "deterministic_coverage_weight": 0.15,
+    "nondeterministic_coverage_weight": 0.20,
+    "evidence_presence_weight": 0.10,
+    "high_impact_unknown_penalty": 0.06,
+    "true_signal_without_evidence_penalty": 0.03,
+    "min": 0.0,
+    "max": 1.0
+  },
+  "agent_gate": {
+    "auto_phish_min_risk": 85,
+    "auto_phish_min_confidence": 0.80,
+    "auto_benign_max_risk": 20,
+    "auto_benign_min_confidence": 0.80,
+    "force_agent_if_high_impact_unknown_count_at_least": 2,
+    "force_agent_if_confidence_below": 0.65,
+    "ambiguous_risk_min": 21,
+    "ambiguous_risk_max": 84
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "non_deterministic_rules": [
+    {"id": "identity.domain_not_owned_by_org", "required_tools": ["org_domain_inventory"]},
+    {"id": "identity.newly_registered_sender_domain", "required_tools": ["whois_domain_age"]},
+    {"id": "identity.lookalike_domain_confirmed", "required_tools": ["brand_lookalike_detector"]},
+    {"id": "auth.missing_spf_record", "required_tools": ["dns_txt_lookup"]},
+    {"id": "auth.missing_dmarc_record", "required_tools": ["dns_txt_lookup"]},
+    {"id": "url.reputation_malicious", "required_tools": ["url_reputation"]},
+    {"id": "url.redirect_chain_detected", "required_tools": ["url_redirect_resolver"]},
+    {"id": "url.domain_newly_registered", "required_tools": ["whois_domain_age"]},
+    {"id": "url.hosting_on_free_provider", "required_tools": ["hosting_provider_intel"]},
+    {"id": "content.similarity_to_known_campaign", "required_tools": ["campaign_similarity"]},
+    {"id": "content.nlp_anomaly_score_high", "required_tools": ["nlp_anomaly_model"]},
+    {"id": "attachment.hash_known_malicious", "required_tools": ["hash_intel_lookup"]},
+    {"id": "attachment.sandbox_behavior_malicious", "required_tools": ["attachment_sandbox"]},
+    {"id": "infra.sending_ip_reputation_bad", "required_tools": ["ip_reputation"]},
+    {"id": "infra.malicious_mx_records", "required_tools": ["dns_mx_lookup", "mx_reputation"]},
+    {"id": "infra.bulletproof_hosting_detected", "required_tools": ["hosting_provider_intel"]},
+    {"id": "behavior.user_not_previous_correspondent", "required_tools": ["mailbox_history"]},
+    {"id": "behavior.multiple_similar_messages_detected", "required_tools": ["campaign_clustering"]},
+    {"id": "evasion.domain_fast_flux_behavior", "required_tools": ["dns_history"]},
+    {"id": "evasion.cdn_abuse_detected", "required_tools": ["cdn_fronting_detector"]}
+  ]
+}

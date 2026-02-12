@@ -398,6 +398,10 @@ def build_envelope(eml_path: str, case_id: str | None = None, source: str = "loc
 
     received_headers = parsed.get_all("Received", [])
     auth_headers = parsed.get_all("Authentication-Results", [])
+    headers_map: dict[str, list[str]] = {}
+    for k, v in parsed.raw_items():
+        k_lower = k.lower()
+        headers_map.setdefault(k_lower, []).append(_safe_decode_header(v, warnings))
 
     text_bodies: list[str] = []
     html_bodies: list[str] = []
@@ -526,6 +530,7 @@ def build_envelope(eml_path: str, case_id: str | None = None, source: str = "loc
             "date": date_header,
             "message_id": message_id,
             "received_chain": [_parse_received_header(v) for v in received_headers],
+            "headers": headers_map,
         },
         "auth_summary": _extract_auth_summary(auth_headers),
         "entities": entities,

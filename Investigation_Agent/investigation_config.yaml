@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "defaults": {
+    "mode": "mock",
+    "max_playbooks": 5,
+    "max_steps": 20,
+    "max_tool_calls": 30,
+    "min_expected_gain": 0.04
+  },
+  "llm": {
+    "model": "gpt-5-mini",
+    "temperature": 0.0,
+    "timeout_seconds": 60
+  },
+  "gating": {
+    "run_score_gate_after_each_playbook": true,
+    "stop_if_gate_passes": true,
+    "stop_if_expected_gain_below_threshold": true
+  }
+}

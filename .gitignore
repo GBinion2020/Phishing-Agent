@@ -1,1 +1,7 @@
 /Uber_Eats.eml
+.env
+__pycache__/
+/Sample_Emails/*.eml
+/Sample_Emails/*.json
+/Sample_Emails/Case_Run_*/
+/MCP_Adapters/ioc_cache.json

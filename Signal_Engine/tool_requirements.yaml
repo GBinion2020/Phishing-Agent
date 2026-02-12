@@ -1,0 +1,22 @@
+{
+  "tools": {
+    "org_domain_inventory": {"description": "Checks whether sender domain belongs to approved enterprise domains", "output_contract": {"owned": "boolean"}},
+    "whois_domain_age": {"description": "Returns domain age in days", "output_contract": {"age_days": "integer"}},
+    "brand_lookalike_detector": {"description": "Scores visual similarity to enterprise brand domains", "output_contract": {"is_lookalike": "boolean", "target_brand": "string"}},
+    "dns_txt_lookup": {"description": "Resolves SPF/DMARC TXT records", "output_contract": {"spf_exists": "boolean", "dmarc_exists": "boolean"}},
+    "url_reputation": {"description": "Threat intel verdict for URLs", "output_contract": {"malicious": "boolean", "confidence": "number"}},
+    "url_redirect_resolver": {"description": "Safe redirect chain expansion", "output_contract": {"redirect_hops": "integer"}},
+    "hosting_provider_intel": {"description": "Hosting provider classification", "output_contract": {"is_free_hosting": "boolean", "is_bulletproof": "boolean"}},
+    "campaign_similarity": {"description": "Template/campaign similarity against known sets", "output_contract": {"matched": "boolean", "campaign_id": "string"}},
+    "nlp_anomaly_model": {"description": "ML anomaly score for message text", "output_contract": {"score": "number", "threshold": "number"}},
+    "hash_intel_lookup": {"description": "Checks attachment hash against malware feeds", "output_contract": {"known_malicious": "boolean", "feed": "string"}},
+    "attachment_sandbox": {"description": "Static/detonation behavior indicator", "output_contract": {"malicious_behavior": "boolean"}},
+    "ip_reputation": {"description": "Sender IP reputation", "output_contract": {"bad": "boolean", "source": "string"}},
+    "dns_mx_lookup": {"description": "Resolves MX records for sender domain", "output_contract": {"mx_hosts": "array"}},
+    "mx_reputation": {"description": "Reputation for MX infrastructure", "output_contract": {"malicious": "boolean"}},
+    "mailbox_history": {"description": "Whether sender has prior recipient correspondence", "output_contract": {"previous_contact": "boolean"}},
+    "campaign_clustering": {"description": "Cross-tenant similar message clustering", "output_contract": {"clustered": "boolean", "cluster_size": "integer"}},
+    "dns_history": {"description": "DNS volatility for fast-flux checks", "output_contract": {"fast_flux": "boolean"}},
+    "cdn_fronting_detector": {"description": "Detects domain fronting/CDN abuse", "output_contract": {"abuse_detected": "boolean"}}
+  }
+}

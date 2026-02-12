@@ -1,0 +1,231 @@
+{
+  "schema_version": "1.0",
+  "playbooks": [
+    {
+      "id": "identity_spoof_investigation",
+      "name": "Identity Spoof Investigation",
+      "description": "Validate sender identity and domain legitimacy.",
+      "priority": 90,
+      "triggers": {
+        "minimum_true": 1,
+        "any_true": [
+          "identity.reply_to_mismatch",
+          "identity.display_name_spoof",
+          "identity.return_path_mismatch",
+          "identity.from_domain_mismatch_in_headers",
+          "identity.lookalike_domain_confirmed"
+        ],
+        "all_true": []
+      },
+      "steps": [
+        {"tool": "whois_domain_age", "args_template": {"domain": "{{message_metadata.from.domain}}"}, "cost": 2},
+        {"tool": "org_domain_inventory", "args_template": {"domain": "{{message_metadata.from.domain}}"}, "cost": 1},
+        {"tool": "brand_lookalike_detector", "args_template": {"domain": "{{message_metadata.from.domain}}"}, "cost": 2}
+      ]
+    },
+    {
+      "id": "auth_failure_validation",
+      "name": "Auth Failure Validation",
+      "description": "Deep validation for SPF/DKIM/DMARC and record presence.",
+      "priority": 95,
+      "triggers": {
+        "minimum_true": 1,
+        "any_true": ["auth.spf_fail", "auth.dkim_fail", "auth.dmarc_fail", "auth.alignment_fail"],
+        "all_true": []
+      },
+      "steps": [
+        {"tool": "dns_txt_lookup", "args_template": {"domain": "{{message_metadata.from.domain}}"}, "cost": 1},
+        {"tool": "dns_mx_lookup", "args_template": {"domain": "{{message_metadata.from.domain}}"}, "cost": 1}
+      ]
+    },
+    {
+      "id": "malicious_url_reputation",
+      "name": "Malicious URL Reputation",
+      "description": "Assess URL reputation and redirect behavior.",
+      "priority": 92,
+      "triggers": {
+        "minimum_true": 1,
+        "any_true": [
+          "url.shortener_used",
+          "url.ip_literal_used",
+          "url.multiple_redirect_pattern_in_path",
+          "url.long_obfuscated_string",
+          "url.embedded_at_symbol",
+          "url.javascript_in_link"
+        ],
+        "all_true": []
+      },
+      "steps": [
+        {"tool": "url_reputation", "args_template": {"url": "{{entities.urls[].normalized}}"}, "cost": 2},
+        {"tool": "url_redirect_resolver", "args_template": {"url": "{{entities.urls[].normalized}}"}, "cost": 2},
+        {"tool": "whois_domain_age", "args_template": {"domain": "{{entities.urls[].domain}}"}, "cost": 2}
+      ]
+    },
+    {
+      "id": "content_credential_harvest",
+      "name": "Credential Harvest Content",
+      "description": "Investigate social engineering and credential theft language.",
+      "priority": 82,
+      "triggers": {
+        "minimum_true": 2,
+        "any_true": [
+          "content.credential_harvest_language",
+          "content.urgency_language",
+          "content.account_suspension_threat",
+          "content.generic_greeting",
+          "content.brand_impersonation"
+        ],
+        "all_true": []
+      },
+      "steps": [
+        {"tool": "campaign_similarity", "args_template": {"text": "{{mime_parts.body_extraction.text_plain}}"}, "cost": 2},
+        {"tool": "nlp_anomaly_model", "args_template": {"text": "{{mime_parts.body_extraction.text_plain}}"}, "cost": 2}
+      ]
+    },
+    {
+      "id": "invoice_fraud_flow",
+      "name": "Invoice Fraud Flow",
+      "description": "Validate invoice/payment lure and BEC-style tactics.",
+      "priority": 80,
+      "triggers": {
+        "minimum_true": 1,
+        "any_true": ["content.payment_or_invoice_lure", "identity.reply_to_mismatch", "behavior.unusual_time_of_day_pattern"],
+        "all_true": []
+      },
+      "steps": [
+        {"tool": "mailbox_history", "args_template": {"sender": "{{message_metadata.from.address}}"}, "cost": 1},
+        {"tool": "org_domain_inventory", "args_template": {"domain": "{{message_metadata.from.domain}}"}, "cost": 1}
+      ]
+    },
+    {
+      "id": "attachment_static_triage",
+      "name": "Attachment Static Triage",
+      "description": "Evaluate suspicious attachment characteristics.",
+      "priority": 94,
+      "triggers": {
+        "minimum_true": 1,
+        "any_true": [
+          "attachment.suspicious_file_type",
+          "attachment.double_extension",
+          "attachment.contains_macro_indicator",
+          "attachment.password_protected_archive",
+          "attachment.embedded_urls"
+        ],
+        "all_true": []
+      },
+      "steps": [
+        {"tool": "hash_intel_lookup", "args_template": {"sha256": "{{attachments[].hashes.sha256}}"}, "cost": 2},
+        {"tool": "attachment_sandbox", "args_template": {"sha256": "{{attachments[].hashes.sha256}}"}, "cost": 3}
+      ]
+    },
+    {
+      "id": "infrastructure_reputation",
+      "name": "Infrastructure Reputation",
+      "description": "Assess sender IP and MX infrastructure quality.",
+      "priority": 88,
+      "triggers": {
+        "minimum_true": 1,
+        "any_true": ["infra.private_ip_in_received_chain", "header.received_chain_anomaly", "infra.timezone_mismatch_in_headers"],
+        "all_true": []
+      },
+      "steps": [
+        {"tool": "ip_reputation", "args_template": {"ip": "{{entities.ips[].ip}}"}, "cost": 2},
+        {"tool": "dns_mx_lookup", "args_template": {"domain": "{{message_metadata.from.domain}}"}, "cost": 1},
+        {"tool": "mx_reputation", "args_template": {"mx": "{{tool.dns_mx_lookup.mx_hosts[]}}"}, "cost": 2}
+      ]
+    },
+    {
+      "id": "evasion_pattern_analysis",
+      "name": "Evasion Pattern Analysis",
+      "description": "Analyze obfuscation and evasion tactics in content/domains.",
+      "priority": 87,
+      "triggers": {
+        "minimum_true": 1,
+        "any_true": [
+          "evasion.base64_encoded_html",
+          "evasion.zero_width_characters",
+          "evasion.homoglyph_substitution",
+          "url.punycode_present"
+        ],
+        "all_true": []
+      },
+      "steps": [
+        {"tool": "brand_lookalike_detector", "args_template": {"domain": "{{entities.domains[].domain}}"}, "cost": 2},
+        {"tool": "dns_history", "args_template": {"domain": "{{entities.domains[].domain}}"}, "cost": 2}
+      ]
+    },
+    {
+      "id": "campaign_correlation",
+      "name": "Campaign Correlation",
+      "description": "Find similar campaigns across mailbox telemetry.",
+      "priority": 78,
+      "triggers": {
+        "minimum_true": 2,
+        "any_true": [
+          "content.urgency_language",
+          "content.generic_greeting",
+          "url.long_obfuscated_string",
+          "attachment.embedded_urls"
+        ],
+        "all_true": []
+      },
+      "steps": [
+        {"tool": "campaign_clustering", "args_template": {"subject": "{{message_metadata.subject}}"}, "cost": 2},
+        {"tool": "campaign_similarity", "args_template": {"text": "{{mime_parts.body_extraction.text_plain}}"}, "cost": 2}
+      ]
+    },
+    {
+      "id": "benign_confirmation_minimal",
+      "name": "Benign Confirmation Minimal",
+      "description": "Low-cost checks for low-risk cases to increase confidence.",
+      "priority": 40,
+      "triggers": {
+        "minimum_true": 0,
+        "any_true": [],
+        "all_true": []
+      },
+      "steps": [
+        {"tool": "whois_domain_age", "args_template": {"domain": "{{message_metadata.from.domain}}"}, "cost": 1},
+        {"tool": "url_reputation", "args_template": {"url": "{{entities.urls[].normalized}}"}, "cost": 1}
+      ]
+    },
+    {
+      "id": "high_risk_fast_path",
+      "name": "High Risk Fast Path",
+      "description": "Focused enrichment for high-risk candidates.",
+      "priority": 99,
+      "triggers": {
+        "minimum_true": 2,
+        "any_true": [
+          "auth.dmarc_fail",
+          "identity.lookalike_domain_confirmed",
+          "url.reputation_malicious",
+          "attachment.hash_known_malicious",
+          "attachment.sandbox_behavior_malicious"
+        ],
+        "all_true": []
+      },
+      "steps": [
+        {"tool": "url_reputation", "args_template": {"url": "{{entities.urls[].normalized}}"}, "cost": 2},
+        {"tool": "hash_intel_lookup", "args_template": {"sha256": "{{attachments[].hashes.sha256}}"}, "cost": 2},
+        {"tool": "ip_reputation", "args_template": {"ip": "{{entities.ips[].ip}}"}, "cost": 2}
+      ]
+    },
+    {
+      "id": "brand_impersonation_deep_dive",
+      "name": "Brand Impersonation Deep Dive",
+      "description": "Investigate brand impersonation and domain ownership anomalies.",
+      "priority": 89,
+      "triggers": {
+        "minimum_true": 1,
+        "any_true": ["content.brand_impersonation", "identity.display_name_spoof", "url.punycode_present"],
+        "all_true": []
+      },
+      "steps": [
+        {"tool": "brand_lookalike_detector", "args_template": {"domain": "{{message_metadata.from.domain}}"}, "cost": 2},
+        {"tool": "org_domain_inventory", "args_template": {"domain": "{{message_metadata.from.domain}}"}, "cost": 1},
+        {"tool": "whois_domain_age", "args_template": {"domain": "{{message_metadata.from.domain}}"}, "cost": 1}
+      ]
+    }
+  ]
+}

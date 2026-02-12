@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "output": {
+    "schema_version": "1.0",
+    "case_id": "string",
+    "generated_at": "ISO-8601 datetime",
+    "signals": {
+      "<signal_id>": {
+        "value": "true|false|unknown",
+        "kind": "deterministic|non_deterministic",
+        "evidence": ["evidence_id_or_path"],
+        "rationale": "string",
+        "tool_requirements": ["tool_name"]
+      }
+    }
+  }
+}
