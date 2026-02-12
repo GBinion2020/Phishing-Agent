@@ -5,6 +5,7 @@
     "brand_lookalike_detector": {"description": "Scores visual similarity to enterprise brand domains", "output_contract": {"is_lookalike": "boolean", "target_brand": "string"}},
     "dns_txt_lookup": {"description": "Resolves SPF/DMARC TXT records", "output_contract": {"spf_exists": "boolean", "dmarc_exists": "boolean"}},
     "url_reputation": {"description": "Threat intel verdict for URLs", "output_contract": {"malicious": "boolean", "confidence": "number"}},
+    "url_detonation": {"description": "Dynamic URL detonation with redirect/runtime verdict", "output_contract": {"malicious": "boolean", "confidence": "number", "redirects": "integer"}},
     "url_redirect_resolver": {"description": "Safe redirect chain expansion", "output_contract": {"redirect_hops": "integer"}},
     "hosting_provider_intel": {"description": "Hosting provider classification", "output_contract": {"is_free_hosting": "boolean", "is_bulletproof": "boolean"}},
     "campaign_similarity": {"description": "Template/campaign similarity against known sets", "output_contract": {"matched": "boolean", "campaign_id": "string"}},

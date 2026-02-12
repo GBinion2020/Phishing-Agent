@@ -8,6 +8,8 @@ Implementation files:
 - `/Users/gabe/Documents/Phishing_Triage_Agent/Investigation_Agent/llm_client.py`
 - `/Users/gabe/Documents/Phishing_Triage_Agent/Investigation_Agent/contracts.py`
 - `/Users/gabe/Documents/Phishing_Triage_Agent/Investigation_Agent/prompt_templates.py`
+- `/Users/gabe/Documents/Phishing_Triage_Agent/Investigation_Agent/pipeline_service.py`
+- `/Users/gabe/Documents/Phishing_Triage_Agent/cli/phishscan.py`
 
 ## Pipeline Stages
 1. Build envelope from `.eml`.
@@ -84,6 +86,19 @@ Generated under run directory (`--out-dir`):
 - `audit_chain.json`
 - `audit_chain.md`
 
+## Event Hook Interface
+`run_pipeline(...)` now supports an optional `event_hook(event_name, payload)` callback to stream progress to clients.
+
+Emitted events:
+- `pipeline_started`
+- `stage_started`
+- `stage_completed`
+- `playbook_started`
+- `playbook_completed`
+- `pipeline_completed`
+
+This keeps core pipeline logic presentation-agnostic so terminal and future HTTP UI layers can share the same orchestration.
+
 ## CLI
 ```bash
 python3 /Users/gabe/Documents/Phishing_Triage_Agent/Investigation_Agent/investigation_pipeline.py \
@@ -92,6 +107,15 @@ python3 /Users/gabe/Documents/Phishing_Triage_Agent/Investigation_Agent/investig
   --mode mock
 ```
 
+Interactive operator CLI:
+```bash
+python3 /Users/gabe/Documents/Phishing_Triage_Agent/cli/phishscan.py
+```
+
 ## Modes
 - `mock`: uses deterministic mock enrichment seeding + cache-backed MCP routing.
 - `live`: reserved for future API wiring; currently MCP live requests are not implemented.
+
+## Environment Resolution
+- Pipeline dotenv loading is anchored to repository root (`/Users/gabe/Documents/Phishing_Triage_Agent/.env`) instead of current shell directory.
+- CLI runner sets process cwd to repo root before execution to prevent path/env drift.

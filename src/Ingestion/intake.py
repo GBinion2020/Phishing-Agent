@@ -92,6 +92,15 @@ def _extract_domain(value: str | None) -> str | None:
     return domain or None
 
 
+def _org_domain(domain: str | None) -> str | None:
+    if not domain:
+        return None
+    parts = domain.lower().strip(".").split(".")
+    if len(parts) < 2:
+        return domain.lower().strip(".")
+    return ".".join(parts[-2:])
+
+
 def _parse_address_header(raw: str | None, warnings: list[str]) -> dict[str, Any] | None:
     if not raw:
         return None
@@ -220,6 +229,8 @@ def _extract_auth_summary(auth_headers: list[str]) -> dict[str, Any]:
     dmarc_policy = None
     dkim_records: list[dict[str, Any]] = []
 
+    header_from_domain = None
+
     for header in auth_headers:
         if spf_result == "unknown":
             m = SPF_RESULT_RE.search(header)
@@ -241,6 +252,10 @@ def _extract_auth_summary(auth_headers: list[str]) -> dict[str, Any]:
             m = DMARC_POLICY_RE.search(header)
             if m:
                 dmarc_policy = m.group(1).lower()
+        if header_from_domain is None:
+            m = HEADER_FROM_RE.search(header)
+            if m:
+                header_from_domain = m.group(1).lower().strip(";")
 
         dkim_result_m = DKIM_RESULT_RE.search(header)
         if dkim_result_m:
@@ -256,10 +271,12 @@ def _extract_auth_summary(auth_headers: list[str]) -> dict[str, Any]:
                 }
             )
 
-    aligned = "unknown"
-    if spf_domain and dkim_records:
-        dkim_domains = {r["domain"] for r in dkim_records if r.get("domain")}
-        aligned = spf_domain in dkim_domains
+    aligned: str | bool = "unknown"
+    from_org = _org_domain(header_from_domain)
+    spf_org = _org_domain(spf_domain)
+    dkim_orgs = {_org_domain(r["domain"]) for r in dkim_records if r.get("domain")}
+    if from_org and (spf_org or dkim_orgs):
+        aligned = (spf_org == from_org) or (from_org in dkim_orgs)
 
     return {
         "spf": {

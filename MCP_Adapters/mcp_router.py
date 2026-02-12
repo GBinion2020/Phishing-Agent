@@ -14,6 +14,8 @@ import argparse
 import base64
 import json
 import os
+import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -175,6 +177,43 @@ def _http_get_json(url: str, headers: dict[str, str] | None = None, timeout: int
     return json.loads(text)
 
 
+def _http_post_json(
+    url: str,
+    body: dict[str, Any],
+    headers: dict[str, str] | None = None,
+    timeout: int = 20,
+    form_encoded: bool = False,
+) -> Any:
+    hdrs = dict(headers or {})
+    if form_encoded:
+        data = urllib.parse.urlencode({k: str(v) for k, v in body.items()}).encode("utf-8")
+        hdrs.setdefault("Content-Type", "application/x-www-form-urlencoded")
+    else:
+        data = json.dumps(body).encode("utf-8")
+        hdrs.setdefault("Content-Type", "application/json")
+    req = urllib.request.Request(url=url, data=data, headers=hdrs, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        text = resp.read().decode("utf-8", errors="replace")
+    return json.loads(text)
+
+
+def _urlscan_transient_error(exc: Exception) -> bool:
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in {404, 408, 410, 429, 500, 502, 503, 504}
+    if isinstance(exc, urllib.error.URLError):
+        reason = exc.reason
+        if isinstance(reason, TimeoutError):
+            return True
+        if isinstance(reason, socket.timeout):
+            return True
+        if isinstance(reason, OSError) and getattr(reason, "errno", None) in {60, 110}:
+            return True
+        text = str(reason).lower()
+        return "timed out" in text or "temporary failure" in text
+    text = str(exc).lower()
+    return "timed out" in text or "timeout" in text
+
+
 def _vt_malicious_from_stats(stats: dict[str, Any]) -> tuple[bool, float]:
     if not isinstance(stats, dict):
         return False, 0.0
@@ -246,24 +285,43 @@ def _live_tool_call(tool_id: str, payload: dict[str, Any], tool: dict[str, Any])
         api_key = _clean_secret(os.getenv("URLSCAN_API_KEY", ""))
         if not api_key:
             raise RuntimeError("URLSCAN_API_KEY missing")
+        lookup_timeout = max(5, int(os.getenv("URLSCAN_LOOKUP_TIMEOUT_SECONDS", "20")))
+        lookup_retries = max(1, int(os.getenv("URLSCAN_LOOKUP_RETRIES", "2")))
         queries: list[str]
         if ioc_type == "url":
             host = urllib.parse.urlparse(value).hostname or value
-            queries = [f"domain:{host}", f"page.domain:{host}", f"page.url:\"{value}\""]
+            queries = [f"page.url:\"{value}\"", f"domain:{host}", f"page.domain:{host}"]
         else:
             queries = [f"domain:{value}", f"page.domain:{value}"]
 
         data = None
         last_error = None
         for query in queries:
-            url = f"{base_url}/search/?q={urllib.parse.quote(query, safe='')}"
-            try:
-                data = _http_get_json(url, headers={"API-Key": api_key, "api-key": api_key})
+            for attempt in range(1, lookup_retries + 1):
+                url = f"{base_url}/search/?q={urllib.parse.quote(query, safe='')}&size=5"
+                try:
+                    data = _http_get_json(
+                        url,
+                        headers={"API-Key": api_key, "api-key": api_key},
+                        timeout=lookup_timeout,
+                    )
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    if _urlscan_transient_error(exc) and attempt < lookup_retries:
+                        time.sleep(min(6, attempt * 2))
+                        continue
+                    break
+            if data is not None:
                 break
-            except Exception as exc:
-                last_error = exc
-                continue
         if data is None:
+            if last_error and _urlscan_transient_error(last_error):
+                return {
+                    "status": "deferred",
+                    "reason": f"urlscan transient lookup failure: {last_error}",
+                    "malicious": False,
+                    "confidence": 0.0,
+                }
             raise RuntimeError(f"urlscan lookup failed: {last_error}")
 
         results = data.get("results", []) if isinstance(data, dict) else []
@@ -280,6 +338,189 @@ def _live_tool_call(tool_id: str, payload: dict[str, Any], tool: dict[str, Any])
             if isinstance(score, (int, float)):
                 confidence = max(confidence, min(1.0, max(0.0, float(score) / 100.0)))
         return {"status": "ok", "malicious": malicious, "confidence": confidence}
+
+    if tool_id == "urlscan_detonate":
+        api_key = _clean_secret(os.getenv("URLSCAN_API_KEY", ""))
+        if not api_key:
+            raise RuntimeError("URLSCAN_API_KEY missing")
+        visibility = os.getenv("URLSCAN_VISIBILITY", "unlisted").strip() or "unlisted"
+        submit_timeout = max(8, int(os.getenv("URLSCAN_SUBMIT_TIMEOUT_SECONDS", "20")))
+        submit_url = f"{base_url}/scan/"
+        try:
+            submitted = _http_post_json(
+                submit_url,
+                {"url": value, "visibility": visibility},
+                headers={"API-Key": api_key, "api-key": api_key},
+                timeout=submit_timeout,
+                form_encoded=False,
+            )
+        except Exception as exc:
+            if _urlscan_transient_error(exc):
+                return {
+                    "status": "deferred",
+                    "reason": f"urlscan detonation submit transient failure: {exc}",
+                    "malicious": False,
+                    "confidence": 0.0,
+                    "scan_id": "unknown",
+                    "result_url": "unknown",
+                    "final_url": value,
+                    "redirects": 0,
+                }
+            raise
+        scan_id = str(submitted.get("uuid") or "").strip()
+        if not scan_id:
+            raise RuntimeError(f"urlscan submission missing uuid: {submitted}")
+        result_url = f"{base_url}/result/{scan_id}/"
+        # urlscan docs recommend waiting ~10s before first result request.
+        initial_wait = max(0, int(os.getenv("URLSCAN_INITIAL_WAIT_SECONDS", "10")))
+        max_seconds = max(5, int(os.getenv("URLSCAN_POLL_MAX_SECONDS", "45")))
+        interval = max(2, int(os.getenv("URLSCAN_POLL_INTERVAL_SECONDS", "3")))
+        result_data: dict[str, Any] | None = None
+        if initial_wait:
+            time.sleep(initial_wait)
+        started = time.time()
+        while (time.time() - started) < max_seconds:
+            try:
+                maybe = _http_get_json(result_url, headers={"API-Key": api_key, "api-key": api_key}, timeout=20)
+                if isinstance(maybe, dict):
+                    result_data = maybe
+                    break
+            except urllib.error.HTTPError as exc:
+                if exc.code in {404, 410, 429}:
+                    time.sleep(interval)
+                    continue
+                if exc.code in {500, 502, 503, 504}:
+                    time.sleep(interval)
+                    continue
+                raise
+            except Exception:
+                time.sleep(interval)
+                continue
+            time.sleep(interval)
+        if result_data is None:
+            return {
+                "status": "deferred",
+                "reason": "urlscan result not ready within polling window",
+                "malicious": False,
+                "confidence": 0.0,
+                "scan_id": scan_id,
+                "result_url": result_url,
+                "final_url": value,
+                "redirects": 0,
+            }
+        overall = (result_data.get("verdicts", {}) or {}).get("overall", {}) or {}
+        score_raw = overall.get("score")
+        score = float(score_raw) if isinstance(score_raw, (int, float)) else 0.0
+        malicious = bool(overall.get("malicious") is True or score >= 70.0)
+        confidence = min(1.0, max(0.05, score / 100.0))
+        page = result_data.get("page", {}) if isinstance(result_data.get("page"), dict) else {}
+        final_url = str(page.get("url") or value)
+        redirects = 0
+        lists = result_data.get("lists", {}) if isinstance(result_data.get("lists"), dict) else {}
+        urls = lists.get("urls", [])
+        if isinstance(urls, list):
+            redirects = max(0, len(urls) - 1)
+        return {
+            "status": "ok",
+            "malicious": malicious,
+            "confidence": confidence,
+            "scan_id": scan_id,
+            "result_url": result_url,
+            "final_url": final_url,
+            "redirects": int(redirects),
+        }
+
+    if tool_id == "cuckoo_url_detonate":
+        base = os.getenv("CUCKOO_BASE_URL", base_url).rstrip("/")
+        api_token = _clean_secret(os.getenv("CUCKOO_API_TOKEN", ""))
+        headers: dict[str, str] = {}
+        if api_token:
+            headers["Authorization"] = f"Bearer {api_token}"
+        submit = _http_post_json(
+            f"{base}/tasks/create/url",
+            {"url": value},
+            headers=headers,
+            timeout=20,
+            form_encoded=True,
+        )
+        task_id = int(submit.get("task_id") or 0)
+        if task_id <= 0:
+            raise RuntimeError(f"cuckoo submission missing task_id: {submit}")
+        max_seconds = max(10, int(os.getenv("CUCKOO_POLL_MAX_SECONDS", "90")))
+        interval = max(3, int(os.getenv("CUCKOO_POLL_INTERVAL_SECONDS", "5")))
+        started = time.time()
+        report: dict[str, Any] | None = None
+        while (time.time() - started) < max_seconds:
+            try:
+                report_data = _http_get_json(f"{base}/tasks/report/{task_id}", headers=headers, timeout=20)
+                if isinstance(report_data, dict) and report_data:
+                    report = report_data
+                    break
+            except urllib.error.HTTPError as exc:
+                if exc.code in {404, 500}:
+                    time.sleep(interval)
+                    continue
+                raise
+            except Exception:
+                time.sleep(interval)
+                continue
+            time.sleep(interval)
+        if report is None:
+            return {
+                "status": "deferred",
+                "malicious": False,
+                "confidence": 0.0,
+                "task_id": task_id,
+                "score": 0.0,
+                "signatures_count": 0,
+            }
+        info = report.get("info", {}) if isinstance(report.get("info"), dict) else {}
+        score_raw = info.get("score")
+        score = float(score_raw) if isinstance(score_raw, (int, float)) else 0.0
+        signatures = report.get("signatures", [])
+        signatures_count = len(signatures) if isinstance(signatures, list) else 0
+        malicious = bool(score >= 6.0 or signatures_count > 0)
+        confidence = min(1.0, max(0.05, score / 10.0))
+        if signatures_count >= 3:
+            confidence = max(confidence, 0.8)
+        return {
+            "status": "ok",
+            "malicious": malicious,
+            "confidence": confidence,
+            "task_id": task_id,
+            "score": score,
+            "signatures_count": signatures_count,
+        }
+
+    if tool_id == "urlhaus_lookup":
+        auth_key = _clean_secret(os.getenv("URLHAUS_AUTH_KEY", ""))
+        headers = {"Auth-Key": auth_key} if auth_key else {}
+        if ioc_type == "url":
+            resp = _http_post_json(
+                f"{base_url}/url/",
+                {"url": value},
+                headers=headers,
+                timeout=20,
+                form_encoded=True,
+            )
+            query_status = str(resp.get("query_status") or "").lower()
+            url_status = str(resp.get("url_status") or "").lower()
+            listed = query_status == "ok" and bool(url_status)
+            malicious = listed
+            confidence = 0.95 if url_status == "online" else (0.85 if listed else 0.05)
+            return {"status": "ok", "malicious": malicious, "confidence": confidence}
+        resp = _http_post_json(
+            f"{base_url}/host/",
+            {"host": value},
+            headers=headers,
+            timeout=20,
+            form_encoded=True,
+        )
+        query_status = str(resp.get("query_status") or "").lower()
+        urls = resp.get("urls", [])
+        listed = query_status == "ok" and isinstance(urls, list) and len(urls) > 0
+        confidence = min(0.95, 0.4 + (len(urls) / 20.0)) if listed else 0.05
+        return {"status": "ok", "malicious": listed, "confidence": confidence}
 
     if tool_id == "icann_rdap_domain":
         domain = urllib.parse.quote(value, safe="")

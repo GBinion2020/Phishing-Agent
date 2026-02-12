@@ -24,6 +24,29 @@ Pipeline stages:
 5. Compute a deterministic verdict from evidence and scoring rules.
 6. Generate a strict analyst report from evidence only.
 
+```mermaid
+flowchart LR
+    A["CLI Input (.eml path)"] --> B["Normalization Envelope"]
+    B --> C["Signal Engine<br/>(Deterministic + Semantic)"]
+    C --> D["Scoring Engine<br/>(Risk + Confidence + Gate)"]
+    D --> E{"Invoke Agent?"}
+    E -- "No" --> H["Final Report + Verdict"]
+    E -- "Yes" --> F["Playbook Selector + Investigation Plan"]
+    F --> G["Adaptive Investigation Loop<br/>(MCP tools + bounded updates)"]
+    G --> D
+    H --> I["Artifacts + Audit Chain"]
+
+    classDef io fill:#E8F1FF,stroke:#3B5CCC,color:#0F1A2B,stroke-width:1px;
+    classDef core fill:#EAF8EF,stroke:#2E7D4F,color:#0F1A2B,stroke-width:1px;
+    classDef gate fill:#FFF6E5,stroke:#A06A00,color:#0F1A2B,stroke-width:1px;
+    classDef out fill:#F5F0FF,stroke:#6B4BA3,color:#0F1A2B,stroke-width:1px;
+
+    class A io;
+    class B,C,D,F,G core;
+    class E gate;
+    class H,I out;
+```
+
 Artifacts:
 - `envelope.json`, `signals.json`, `evidence_log.jsonl`, `verdict.json`, `analyst_report.json`, and derived IOC bundles.
 
@@ -35,6 +58,9 @@ Artifacts:
 - Playbook Selector: `/Users/gabe/Documents/Phishing_Triage_Agent/Playbooks/playbook_selector.py`
 - MCP Adapter Stubs + Cache: `/Users/gabe/Documents/Phishing_Triage_Agent/MCP_Adapters/mcp_router.py`
 - Investigation Agent (adaptive loop): `/Users/gabe/Documents/Phishing_Triage_Agent/Investigation_Agent/investigation_pipeline.py`
+- CLI Runner + service abstraction:
+  - `/Users/gabe/Documents/Phishing_Triage_Agent/cli/phishscan.py`
+  - `/Users/gabe/Documents/Phishing_Triage_Agent/Investigation_Agent/pipeline_service.py`
 
 ## Component Docs
 - Normalization pipeline: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/normalization/normalization_pipeline.md`
@@ -47,6 +73,33 @@ Artifacts:
 - Audit chain: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/investigation/audit_chain.md`
 - Prompt contracts: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/prompts/prompt_contracts.md`
 - Confidence gate and pivot: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/gating/confidence_gate_and_pivot.md`
+- Command-line workflow: `/Users/gabe/Documents/Phishing_Triage_Agent/Docs/cli/command_line_tool.md`
+
+## CLI Usage
+Interactive mode (prompts for `.eml` path with extension validation):
+```bash
+python3 /Users/gabe/Documents/Phishing_Triage_Agent/cli/phishscan.py
+```
+
+One-shot mode:
+```bash
+python3 /Users/gabe/Documents/Phishing_Triage_Agent/cli/phishscan.py \
+  --eml /absolute/path/to/email.eml \
+  --mode live
+```
+
+Optional scrub of run artifacts after each run:
+```bash
+python3 /Users/gabe/Documents/Phishing_Triage_Agent/cli/phishscan.py --scrub-artifacts
+```
+
+## Dynamic Analysis Providers
+Current pipeline supports URL dynamic analysis through:
+- `urlscan_detonate` (hosted detonation + result polling)
+- `cuckoo_url_detonate` (self-hosted CAPE/Cuckoo URL task + report polling)
+- `urlhaus_lookup` (malware URL/host reputation enrichment)
+
+Configure API/runtime settings in `/Users/gabe/Documents/Phishing_Triage_Agent/.env` (see `/Users/gabe/Documents/Phishing_Triage_Agent/.env.example`).
 
 ## Project Plan
 The implementation plan is organized into phases. This README summarizes the plan at a high level; details are in `Docs/phishing_agent_engineering_report.md`.

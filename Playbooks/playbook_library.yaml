@@ -57,6 +57,7 @@
       },
       "steps": [
         {"tool": "url_reputation", "args_template": {"url": "{{entities.urls[].normalized}}"}, "cost": 2},
+        {"tool": "url_detonation", "args_template": {"url": "{{entities.urls[].normalized}}"}, "cost": 3},
         {"tool": "url_redirect_resolver", "args_template": {"url": "{{entities.urls[].normalized}}"}, "cost": 2},
         {"tool": "whois_domain_age", "args_template": {"domain": "{{entities.urls[].domain}}"}, "cost": 2}
       ]
@@ -207,6 +208,7 @@
       },
       "steps": [
         {"tool": "url_reputation", "args_template": {"url": "{{entities.urls[].normalized}}"}, "cost": 2},
+        {"tool": "url_detonation", "args_template": {"url": "{{entities.urls[].normalized}}"}, "cost": 3},
         {"tool": "hash_intel_lookup", "args_template": {"sha256": "{{attachments[].hashes.sha256}}"}, "cost": 2},
         {"tool": "ip_reputation", "args_template": {"ip": "{{entities.ips[].ip}}"}, "cost": 2}
       ]

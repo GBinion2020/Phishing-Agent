@@ -106,6 +106,91 @@
       }
     },
     {
+      "id": "urlscan_detonate",
+      "mcp_tool": "detonate_url_urlscan",
+      "provider": "urlscan.io",
+      "base_url": "https://urlscan.io/api/v1",
+      "auth_env_var": "URLSCAN_API_KEY",
+      "free_tier": true,
+      "ioc_types": ["url"],
+      "cache_ttl_seconds": 21600,
+      "input_schema": {
+        "type": "object",
+        "required": ["ioc_type", "value"],
+        "properties": {
+          "ioc_type": {"enum": ["url"]},
+          "value": {"type": "string", "min_length": 4}
+        }
+      },
+      "output_schema": {
+        "required": ["status", "malicious", "confidence", "scan_id", "result_url", "final_url", "redirects"],
+        "properties": {
+          "status": {"enum": ["ok", "deferred", "error"]},
+          "malicious": {"type": "boolean"},
+          "confidence": {"type": "number"},
+          "scan_id": {"type": "string"},
+          "result_url": {"type": "string"},
+          "final_url": {"type": "string"},
+          "redirects": {"type": "integer"}
+        }
+      }
+    },
+    {
+      "id": "cuckoo_url_detonate",
+      "mcp_tool": "detonate_url_cuckoo",
+      "provider": "CAPE/Cuckoo",
+      "base_url": "http://127.0.0.1:8090",
+      "auth_env_var": "CUCKOO_API_TOKEN",
+      "free_tier": true,
+      "ioc_types": ["url"],
+      "cache_ttl_seconds": 21600,
+      "input_schema": {
+        "type": "object",
+        "required": ["ioc_type", "value"],
+        "properties": {
+          "ioc_type": {"enum": ["url"]},
+          "value": {"type": "string", "min_length": 4}
+        }
+      },
+      "output_schema": {
+        "required": ["status", "malicious", "confidence", "task_id", "score", "signatures_count"],
+        "properties": {
+          "status": {"enum": ["ok", "deferred", "error"]},
+          "malicious": {"type": "boolean"},
+          "confidence": {"type": "number"},
+          "task_id": {"type": "integer"},
+          "score": {"type": "number"},
+          "signatures_count": {"type": "integer"}
+        }
+      }
+    },
+    {
+      "id": "urlhaus_lookup",
+      "mcp_tool": "enrich_url_urlhaus",
+      "provider": "URLhaus",
+      "base_url": "https://urlhaus-api.abuse.ch/v1",
+      "auth_env_var": "URLHAUS_AUTH_KEY",
+      "free_tier": true,
+      "ioc_types": ["url", "domain"],
+      "cache_ttl_seconds": 21600,
+      "input_schema": {
+        "type": "object",
+        "required": ["ioc_type", "value"],
+        "properties": {
+          "ioc_type": {"enum": ["url", "domain"]},
+          "value": {"type": "string", "min_length": 3}
+        }
+      },
+      "output_schema": {
+        "required": ["status", "malicious", "confidence"],
+        "properties": {
+          "status": {"enum": ["ok", "deferred", "error"]},
+          "malicious": {"type": "boolean"},
+          "confidence": {"type": "number"}
+        }
+      }
+    },
+    {
       "id": "icann_rdap_domain",
       "mcp_tool": "enrich_domain_icann_rdap",
       "provider": "ICANN RDAP",

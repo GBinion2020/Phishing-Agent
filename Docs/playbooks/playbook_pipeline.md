@@ -46,6 +46,10 @@ Each playbook includes:
 - signal triggers
 - step list (tool, args template, cost)
 
+Dynamic analysis integration:
+- `malicious_url_reputation` now includes `url_detonation` (urlscan + Cuckoo/CAPE adapters).
+- `high_risk_fast_path` now includes `url_detonation` for accelerated verdict hardening on high-risk cases.
+
 ## Output
 Selector output includes:
 - `selected_playbook_count`

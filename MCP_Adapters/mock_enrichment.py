@@ -60,6 +60,37 @@ def synthesize_mock_output(tool_id: str, payload: dict[str, Any]) -> dict[str, A
             "confidence": confidence,
         }
 
+    if tool_id == "urlscan_detonate":
+        malicious = _contains_suspicious_token(lv)
+        return {
+            "status": "ok",
+            "malicious": malicious,
+            "confidence": 0.93 if malicious else 0.2,
+            "scan_id": "mock-scan-001",
+            "result_url": "https://urlscan.io/result/mock-scan-001/",
+            "final_url": value,
+            "redirects": 2 if malicious else 0,
+        }
+
+    if tool_id == "cuckoo_url_detonate":
+        malicious = _contains_suspicious_token(lv)
+        return {
+            "status": "ok",
+            "malicious": malicious,
+            "confidence": 0.9 if malicious else 0.2,
+            "task_id": 1001,
+            "score": 8.0 if malicious else 1.0,
+            "signatures_count": 4 if malicious else 0,
+        }
+
+    if tool_id == "urlhaus_lookup":
+        malicious = _contains_suspicious_token(lv)
+        return {
+            "status": "ok",
+            "malicious": malicious,
+            "confidence": 0.95 if malicious else 0.05,
+        }
+
     if tool_id in {"virustotal_ip", "abuseipdb_check"} and ioc_type == "ip":
         malicious = False
         confidence = 0.1

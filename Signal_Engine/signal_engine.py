@@ -99,6 +99,23 @@ def _extract_domain_from_email(address: str | None) -> str | None:
     return address.rsplit("@", 1)[1].lower().strip(".")
 
 
+def _org_domain(domain: str | None) -> str | None:
+    if not domain:
+        return None
+    parts = domain.lower().strip(".").split(".")
+    if len(parts) < 2:
+        return domain.lower().strip(".")
+    return ".".join(parts[-2:])
+
+
+def _domains_related(a: str | None, b: str | None) -> bool:
+    if not a or not b:
+        return False
+    a = a.lower().strip(".")
+    b = b.lower().strip(".")
+    return a == b or a.endswith(f".{b}") or b.endswith(f".{a}") or _org_domain(a) == _org_domain(b)
+
+
 def _msg(envelope: dict[str, Any]) -> dict[str, Any]:
     return envelope.get("message_metadata", {})
 
@@ -169,8 +186,9 @@ def identity_return_path_mismatch(envelope: dict[str, Any]) -> SignalResult:
         return _signal("unknown", "Return-Path missing or unparsable", ["message_metadata.return_path"])
     if not from_domain:
         return _signal("unknown", "From domain missing", ["message_metadata.from"])
+    mismatch = not _domains_related(return_domain, from_domain)
     return _signal(
-        "true" if return_domain != from_domain else "false",
+        "true" if mismatch else "false",
         f"From domain '{from_domain}' vs Return-Path domain '{return_domain}'",
         ["message_metadata.from", "message_metadata.return_path"],
     )
@@ -189,7 +207,7 @@ def identity_from_domain_mismatch_in_headers(envelope: dict[str, Any]) -> Signal
         candidates.add(return_domain)
     if not from_domain or not candidates:
         return _signal("unknown", "Insufficient header domains to compare", ["message_metadata.message_id", "message_metadata.return_path"])
-    mismatch = any(dom != from_domain for dom in candidates)
+    mismatch = any(not _domains_related(dom, from_domain) for dom in candidates)
     if mismatch:
         auth = envelope.get("auth_summary", {})
         auth_unknown = (
@@ -240,7 +258,8 @@ def header_received_chain_anomaly(envelope: dict[str, Any]) -> SignalResult:
     if len(parsed_dates) >= 2:
         chronological_issue = any(parsed_dates[idx] < parsed_dates[idx + 1] for idx in range(len(parsed_dates) - 1))
 
-    anomaly = missing_fields > 0 or chronological_issue
+    # A single missing token in Received hops is common for legitimate infrastructure.
+    anomaly = missing_fields >= 3 or chronological_issue
     rationale_parts = []
     if missing_fields:
         rationale_parts.append(f"missing_fields={missing_fields}")
@@ -416,7 +435,11 @@ def content_urgency_language(envelope: dict[str, Any]) -> SignalResult:
 def content_payment_or_invoice_lure(envelope: dict[str, Any]) -> SignalResult:
     body = _body_text(envelope)
     matches = [kw for kw in PAYMENT_KWS if kw in body]
-    return _signal("true" if matches else "false", f"Payment/invoice keywords matched: {matches}" if matches else "No payment/invoice lure keywords", ["mime_parts.body_extraction"])
+    if len(matches) >= 2:
+        return _signal("true", f"Payment/invoice keywords matched: {matches}", ["mime_parts.body_extraction"])
+    if len(matches) == 1:
+        return _signal("unknown", f"Single payment/invoice keyword matched: {matches}", ["mime_parts.body_extraction"])
+    return _signal("false", "No payment/invoice lure keywords", ["mime_parts.body_extraction"])
 
 
 def content_account_suspension_threat(envelope: dict[str, Any]) -> SignalResult:
@@ -466,8 +489,12 @@ def content_html_form_embedded(envelope: dict[str, Any]) -> SignalResult:
 
 def content_hidden_text_or_css(envelope: dict[str, Any]) -> SignalResult:
     html = envelope.get("mime_parts", {}).get("body_extraction", {}).get("text_html", "").lower()
-    hidden = any(token in html for token in ("display:none", "visibility:hidden", "font-size:0", "opacity:0"))
-    return _signal("true" if hidden else "false", "Hidden CSS/text markers found" if hidden else "No hidden CSS/text markers", ["mime_parts.body_extraction.text_html"])
+    markers = [token for token in ("display:none", "visibility:hidden", "font-size:0", "opacity:0") if token in html]
+    if len(markers) >= 2:
+        return _signal("true", f"Multiple hidden CSS/text markers found: {markers}", ["mime_parts.body_extraction.text_html"])
+    if len(markers) == 1:
+        return _signal("unknown", f"Single hidden CSS/text marker found: {markers[0]}", ["mime_parts.body_extraction.text_html"])
+    return _signal("false", "No hidden CSS/text markers", ["mime_parts.body_extraction.text_html"])
 
 
 def attachment_suspicious_file_type(envelope: dict[str, Any]) -> SignalResult:
@@ -544,6 +571,13 @@ def infra_timezone_mismatch_in_headers(envelope: dict[str, Any]) -> SignalResult
         if m:
             offsets.add(m.group(1))
     mismatch = len(offsets) > 1
+    if mismatch and len(offsets) <= 2:
+        relay_context = any(
+            any(hint in str((hop.get("by") or "")).lower() for hint in ("google", "microsoft", "outlook", "sparkpost", "proofpoint"))
+            for hop in (_msg(envelope).get("received_chain") or [])
+        )
+        if relay_context:
+            return _signal("false", f"Timezone offset variation likely relay-induced: {sorted(offsets)}", ["message_metadata.received_chain"])
     if not offsets:
         return _signal("unknown", "No timezone offsets parsed from Received chain", ["message_metadata.received_chain"])
     return _signal("true" if mismatch else "false", f"Received timezone offsets={sorted(offsets)}", ["message_metadata.received_chain"])
@@ -556,7 +590,9 @@ def behavior_unusual_time_of_day_pattern(envelope: dict[str, Any]) -> SignalResu
     try:
         dt = parsedate_to_datetime(date_text)
         unusual = dt.hour < 5
-        return _signal("true" if unusual else "false", f"Message hour={dt.hour}", ["message_metadata.date"])
+        if unusual:
+            return _signal("unknown", f"Message hour={dt.hour} (sender timezone context unavailable)", ["message_metadata.date"])
+        return _signal("false", f"Message hour={dt.hour}", ["message_metadata.date"])
     except Exception:
         return _signal("unknown", "Unable to parse message date", ["message_metadata.date"])
 

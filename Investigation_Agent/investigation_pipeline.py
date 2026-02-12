@@ -20,7 +20,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -63,7 +63,9 @@ from Investigation_Agent.prompt_templates import (
 
 
 TOOL_ALIAS_TO_MCP: dict[str, list[str]] = {
-    "url_reputation": ["virustotal_url", "urlscan_lookup"],
+    "url_reputation": ["virustotal_url", "urlscan_lookup", "urlhaus_lookup"],
+    # Cuckoo detonation is intentionally disabled until local sandbox infra is ready.
+    "url_detonation": ["urlscan_detonate"],
     "whois_domain_age": ["icann_rdap_domain"],
     "hash_intel_lookup": ["virustotal_hash", "alienvault_otx"],
     "ip_reputation": ["abuseipdb_check", "virustotal_ip"],
@@ -88,6 +90,7 @@ TOOL_ALIAS_TO_SIGNAL_IDS: dict[str, list[str]] = {
     "brand_lookalike_detector": ["identity.lookalike_domain_confirmed"],
     "dns_txt_lookup": ["auth.missing_spf_record", "auth.missing_dmarc_record"],
     "url_reputation": ["url.reputation_malicious"],
+    "url_detonation": ["url.reputation_malicious", "url.redirect_chain_detected"],
     "url_redirect_resolver": ["url.redirect_chain_detected"],
     "hosting_provider_intel": ["url.hosting_on_free_provider", "infra.bulletproof_hosting_detected"],
     "campaign_similarity": ["content.similarity_to_known_campaign"],
@@ -112,9 +115,22 @@ class Budget:
     min_expected_gain: float
 
 
+EventHook = Callable[[str, dict[str, Any]], None]
+
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _emit(event_hook: EventHook | None, event: str, payload: dict[str, Any]) -> None:
+    if event_hook is None:
+        return
+    try:
+        event_hook(event, payload)
+    except Exception:
+        # Event handlers are best-effort and should not break the pipeline.
+        return
 
 
 
@@ -137,6 +153,21 @@ def _load_json_or_yaml(path: Path) -> dict[str, Any]:
 
 def _extract_primary_domain(envelope: dict[str, Any]) -> str | None:
     return ((envelope.get("message_metadata", {}).get("from") or {}).get("domain") or None)
+
+
+def _org_domain(domain: str | None) -> str | None:
+    if not domain:
+        return None
+    parts = domain.lower().strip(".").split(".")
+    if len(parts) < 2:
+        return domain.lower().strip(".")
+    return ".".join(parts[-2:])
+
+
+def _configured_org_domains() -> set[str]:
+    raw = os.getenv("ORG_TRUSTED_DOMAINS", "")
+    values = {v.strip().lower() for v in raw.split(",") if v.strip()}
+    return values
 
 
 
@@ -199,7 +230,7 @@ def _build_tool_payloads(tool_alias: str, envelope: dict[str, Any]) -> list[dict
     ips = _extract_ips(envelope)
     hashes = _extract_hashes(envelope)
 
-    if tool_alias in {"url_reputation"}:
+    if tool_alias in {"url_reputation", "url_detonation"}:
         return [{"ioc_type": "url", "value": u} for u in urls[:3]]
     if tool_alias in {"whois_domain_age", "brand_lookalike_detector", "dns_txt_lookup", "dns_mx_lookup", "dns_history", "cdn_fronting_detector", "hosting_provider_intel", "mx_reputation"}:
         return [{"ioc_type": "domain", "value": d} for d in domains[:3]]
@@ -219,7 +250,16 @@ def _execute_internal_tool(tool_alias: str, payload: dict[str, Any], envelope: d
     value = str(payload.get("value", "")).lower()
 
     if tool_alias == "org_domain_inventory":
-        owned = value in INTERNAL_TRUSTED_DOMAINS or value.endswith(".edu")
+        configured = _configured_org_domains()
+        if not configured:
+            return {"status": "deferred", "reason": "ORG_TRUSTED_DOMAINS not configured", "confidence": 0.0}
+        org_set = INTERNAL_TRUSTED_DOMAINS.union(configured)
+        owned = (
+            value in org_set
+            or _org_domain(value) in org_set
+            or value.endswith(".edu")
+            or value.endswith(".gov")
+        )
         return {"status": "ok", "owned": owned, "confidence": 0.8 if owned else 0.7}
 
     if tool_alias == "brand_lookalike_detector":
@@ -255,9 +295,8 @@ def _execute_internal_tool(tool_alias: str, payload: dict[str, Any], envelope: d
         return {"status": "ok", "malicious_behavior": malicious, "confidence": 0.75 if malicious else 0.2}
 
     if tool_alias == "mailbox_history":
-        sender = ((envelope.get("message_metadata", {}).get("from") or {}).get("address") or "").lower()
-        previous_contact = sender.endswith(".edu") or sender.endswith("@gmail.com")
-        return {"status": "ok", "previous_contact": previous_contact, "confidence": 0.55}
+        # Do not assert "new correspondent" without real mailbox telemetry.
+        return {"status": "deferred", "reason": "mailbox history provider not configured", "confidence": 0.0}
 
     if tool_alias == "campaign_clustering":
         subject = (envelope.get("message_metadata", {}).get("subject") or "").lower()
@@ -289,6 +328,10 @@ def _map_tool_result_to_signal_updates(
 ) -> list[dict[str, Any]]:
     output = result.get("output", result)
     updates: list[dict[str, Any]] = []
+    if not isinstance(output, dict):
+        return updates
+    if str(output.get("status", "ok")).lower() != "ok":
+        return updates
 
     def add(signal_id: str, value: str, rationale: str) -> None:
         updates.append(
@@ -335,6 +378,14 @@ def _map_tool_result_to_signal_updates(
         mal = output.get("malicious")
         if isinstance(mal, bool):
             add("url.reputation_malicious", "true" if mal else "false", f"url reputation malicious={mal}")
+
+    elif tool_alias == "url_detonation":
+        mal = output.get("malicious")
+        redirects = output.get("redirects")
+        if isinstance(mal, bool):
+            add("url.reputation_malicious", "true" if mal else "false", f"url detonation malicious={mal}")
+        if isinstance(redirects, int):
+            add("url.redirect_chain_detected", "true" if redirects > 1 else "false", f"url detonation redirects={redirects}")
 
     elif tool_alias == "url_redirect_resolver":
         chain = output.get("redirect_chain")
@@ -407,8 +458,17 @@ def _map_tool_result_to_signal_updates(
 
 def _dedupe_updates(updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
+    rank = {"true": 3, "false": 2, "unknown": 1}
     for up in updates:
-        latest[up["signal_id"]] = up
+        sid = up["signal_id"]
+        prev = latest.get(sid)
+        if prev is None:
+            latest[sid] = up
+            continue
+        prev_rank = rank.get(str(prev.get("value", "unknown")), 0)
+        new_rank = rank.get(str(up.get("value", "unknown")), 0)
+        if new_rank >= prev_rank:
+            latest[sid] = up
     return list(latest.values())
 
 
@@ -662,13 +722,20 @@ def _execute_playbook(
 
 
 
-def run_pipeline(eml_path: str, out_dir: str, mode: str = "mock") -> dict[str, Any]:
-    load_dotenv()
+def run_pipeline(
+    eml_path: str,
+    out_dir: str,
+    mode: str = "mock",
+    event_hook: EventHook | None = None,
+) -> dict[str, Any]:
+    load_dotenv(str(ROOT / ".env"))
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    _emit(event_hook, "pipeline_started", {"eml_path": eml_path, "out_dir": str(out), "mode": mode})
 
     # Core configs
+    _emit(event_hook, "stage_started", {"stage": "load_configs"})
     signal_taxonomy = _load_json_or_yaml(ROOT / "Signal_Engine" / "signal_taxonomy.yaml")
     signal_det_rules = _load_json_or_yaml(ROOT / "Signal_Engine" / "signal_rules_deterministic.yaml")
     signal_nondet_rules = _load_json_or_yaml(ROOT / "Signal_Engine" / "signal_rules_nondeterministic.yaml")
@@ -691,12 +758,25 @@ def run_pipeline(eml_path: str, out_dir: str, mode: str = "mock") -> dict[str, A
     )
 
     llm = LLMClient(timeout_seconds=env_int("OPENAI_TIMEOUT_SECONDS", 60))
+    _emit(event_hook, "stage_completed", {"stage": "load_configs"})
 
     # 1) Envelope
+    _emit(event_hook, "stage_started", {"stage": "normalize_envelope"})
     envelope = build_envelope(eml_path=eml_path, source="local_file")
     (out / "envelope.json").write_text(json.dumps(envelope, indent=2) + "\n", encoding="utf-8")
+    _emit(
+        event_hook,
+        "stage_completed",
+        {
+            "stage": "normalize_envelope",
+            "case_id": envelope.get("case_id"),
+            "sender": (envelope.get("message_metadata", {}).get("from") or {}).get("address"),
+            "subject": envelope.get("message_metadata", {}).get("subject"),
+        },
+    )
 
     # 2) Baseline signals + scoring
+    _emit(event_hook, "stage_started", {"stage": "baseline_scoring"})
     signals_doc = run_signal_engine(
         envelope=envelope,
         taxonomy=signal_taxonomy,
@@ -718,13 +798,27 @@ def run_pipeline(eml_path: str, out_dir: str, mode: str = "mock") -> dict[str, A
     (out / "semantic_assessment.json").write_text(json.dumps(semantic_doc, indent=2) + "\n", encoding="utf-8")
     (out / "signals.baseline.json").write_text(json.dumps(signals_doc, indent=2) + "\n", encoding="utf-8")
     (out / "score.baseline.json").write_text(json.dumps(score_doc, indent=2) + "\n", encoding="utf-8")
+    _emit(
+        event_hook,
+        "stage_completed",
+        {
+            "stage": "baseline_scoring",
+            "risk_score": score_doc.get("risk_score"),
+            "confidence_score": score_doc.get("confidence_score"),
+            "verdict": score_doc.get("verdict"),
+            "invoke_agent": score_doc.get("agent_gate", {}).get("invoke_agent"),
+        },
+    )
 
     # 3) Candidate playbooks
+    _emit(event_hook, "stage_started", {"stage": "select_playbooks"})
     candidates_doc = select_playbooks(signals_doc, playbook_cfg)
     candidates = candidates_doc.get("selected_playbooks", [])
     (out / "playbooks.candidates.json").write_text(json.dumps(candidates_doc, indent=2) + "\n", encoding="utf-8")
+    _emit(event_hook, "stage_completed", {"stage": "select_playbooks", "candidate_count": len(candidates)})
 
     if not score_doc.get("agent_gate", {}).get("invoke_agent", True):
+        _emit(event_hook, "stage_started", {"stage": "final_report"})
         final_report = _llm_report(llm, envelope, signals_doc, score_doc, [])
         result = {
             "schema_version": "1.0",
@@ -739,9 +833,31 @@ def run_pipeline(eml_path: str, out_dir: str, mode: str = "mock") -> dict[str, A
             "final_report": final_report,
         }
         (out / "investigation_result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+        _emit(
+            event_hook,
+            "stage_completed",
+            {
+                "stage": "final_report",
+                "risk_score": score_doc.get("risk_score"),
+                "confidence_score": score_doc.get("confidence_score"),
+                "verdict": score_doc.get("verdict"),
+            },
+        )
+        _emit(
+            event_hook,
+            "pipeline_completed",
+            {
+                "case_id": result.get("case_id"),
+                "agent_invoked": False,
+                "risk_score": score_doc.get("risk_score"),
+                "confidence_score": score_doc.get("confidence_score"),
+                "verdict": score_doc.get("verdict"),
+            },
+        )
         return result
 
     # 4) LLM plan with fallback
+    _emit(event_hook, "stage_started", {"stage": "build_plan"})
     try:
         plan_doc = _llm_plan(llm, envelope, signals_doc, score_doc, candidates, budget.max_playbooks)
     except Exception as exc:
@@ -749,8 +865,14 @@ def run_pipeline(eml_path: str, out_dir: str, mode: str = "mock") -> dict[str, A
         plan_doc["why"].append(f"LLM plan fallback due to error: {exc}")
 
     (out / "investigation_plan.json").write_text(json.dumps(plan_doc, indent=2) + "\n", encoding="utf-8")
+    _emit(
+        event_hook,
+        "stage_completed",
+        {"stage": "build_plan", "planned_playbooks": plan_doc.get("playbook_order", [])[: budget.max_playbooks]},
+    )
 
     # 5) Adaptive loop
+    _emit(event_hook, "stage_started", {"stage": "adaptive_investigation"})
     llm_rank_order = [pid for pid in plan_doc.get("playbook_order", []) if isinstance(pid, str)]
     remaining = [pb for pb in candidates if pb.get("id") in llm_rank_order] + [pb for pb in candidates if pb.get("id") not in llm_rank_order]
 
@@ -788,6 +910,15 @@ def run_pipeline(eml_path: str, out_dir: str, mode: str = "mock") -> dict[str, A
             stop_reason = "expected_gain_below_threshold"
             break
 
+        _emit(
+            event_hook,
+            "playbook_started",
+            {
+                "playbook_id": next_pb.get("id"),
+                "playbook_name": next_pb.get("name"),
+                "expected_gain": round(expected_gain, 4),
+            },
+        )
         seen_pb.add(next_pb["id"])
         total_steps += len(next_pb.get("steps", []))
 
@@ -843,12 +974,36 @@ def run_pipeline(eml_path: str, out_dir: str, mode: str = "mock") -> dict[str, A
             },
         }
         iterations.append(iteration)
+        _emit(
+            event_hook,
+            "playbook_completed",
+            {
+                "playbook_id": next_pb.get("id"),
+                "playbook_name": next_pb.get("name"),
+                "tool_calls_used": calls_used,
+                "risk_score": current_score.get("risk_score"),
+                "confidence_score": current_score.get("confidence_score"),
+                "verdict": current_score.get("verdict"),
+                "llm_notes": llm_updates_doc.get("notes", ""),
+            },
+        )
 
         # confidence gate after each playbook
         if not current_score.get("agent_gate", {}).get("invoke_agent", True):
             stop_reason = "confidence_gate_satisfied"
             break
 
+    _emit(
+        event_hook,
+        "stage_completed",
+        {
+            "stage": "adaptive_investigation",
+            "stop_reason": stop_reason,
+            "used_playbooks": len(seen_pb),
+            "used_tool_calls": total_tool_calls,
+        },
+    )
+    _emit(event_hook, "stage_started", {"stage": "final_report"})
     final_report = _llm_report(llm, envelope, current_signals, current_score, iterations)
 
     result = {
@@ -890,6 +1045,29 @@ def run_pipeline(eml_path: str, out_dir: str, mode: str = "mock") -> dict[str, A
     )
     (out / "audit_chain.json").write_text(json.dumps(audit, indent=2) + "\n", encoding="utf-8")
     (out / "audit_chain.md").write_text(to_markdown(audit), encoding="utf-8")
+    _emit(
+        event_hook,
+        "stage_completed",
+        {
+            "stage": "final_report",
+            "risk_score": current_score.get("risk_score"),
+            "confidence_score": current_score.get("confidence_score"),
+            "verdict": current_score.get("verdict"),
+        },
+    )
+    _emit(
+        event_hook,
+        "pipeline_completed",
+        {
+            "case_id": result.get("case_id"),
+            "agent_invoked": result.get("agent_invoked"),
+            "stop_reason": result.get("stop_reason"),
+            "risk_score": current_score.get("risk_score"),
+            "confidence_score": current_score.get("confidence_score"),
+            "verdict": current_score.get("verdict"),
+            "used_playbooks": result.get("budgets", {}).get("used_playbooks"),
+        },
+    )
 
     return result
 

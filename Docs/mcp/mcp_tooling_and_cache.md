@@ -4,7 +4,7 @@
 Provide MCP-style tool contracts for enrichment APIs with:
 - strict input/output schema checks
 - local IOC caching
-- deferred mode (no live API calls yet)
+- live API routing with deferred/error fallbacks
 
 Implementation files:
 - `/Users/gabe/Documents/Phishing_Triage_Agent/MCP_Adapters/mcp_tool_registry.yaml`
@@ -20,11 +20,13 @@ Implementation files:
 ## API Candidates (open/free tier)
 Configured in registry for staged integration:
 1. VirusTotal (URL/IP/hash)
-2. urlscan.io (URL/domain)
+2. urlscan.io (URL/domain + detonation)
 3. ICANN RDAP (domain registration)
 4. AbuseIPDB (IP reputation)
 5. AlienVault OTX (multi-IOC intel)
 6. crt.sh (certificate transparency/domain context)
+7. URLhaus (malware URL/host reputation)
+8. CAPE/Cuckoo (self-hosted URL detonation)
 
 Deprecated from active registry:
 - PhishTank
@@ -52,7 +54,14 @@ Request flow:
 2. Check IOC cache by `(tool_id, ioc_type, value)`.
 3. Return cached result if fresh.
 4. If no cache and live mode disabled, return deferred stub.
-5. If live mode enabled, enforce API key presence and fail (not wired in this phase).
+5. If live mode enabled, execute provider adapter and normalize output.
+6. If live call fails (missing key, timeout, provider error), return schema-valid `error` output.
+
+urlscan-specific hardening:
+- lookup now retries transient failures (`timeout`, `429`, `503`, etc.) with bounded backoff.
+- transient lookup exhaustion returns `status=deferred` (not hard error), preserving deterministic behavior.
+- detonation follows urlscan guidance with configurable initial wait before polling results.
+- detonation poll timeout returns `status=deferred` with explicit reason (`result not ready within polling window`).
 
 ## Cache Behavior
 Cache store:
@@ -87,12 +96,24 @@ python3 /Users/gabe/Documents/Phishing_Triage_Agent/MCP_Adapters/mcp_router.py \
 
 Then call again to verify cache hit.
 
-## Next Integration Step
-When API keys are available:
-1. implement provider-specific request adapters behind current router
-2. normalize provider outputs into shared contract
-3. map normalized outputs back to non-deterministic signal updates
-
 ## Environment
 Keys and mode defaults are configured in:
 - `/Users/gabe/Documents/Phishing_Triage_Agent/.env`
+
+Suggested variables:
+- `URLSCAN_API_KEY`
+- `URLSCAN_VISIBILITY` (default: `unlisted`)
+- `URLSCAN_LOOKUP_TIMEOUT_SECONDS` (default: `20`)
+- `URLSCAN_LOOKUP_RETRIES` (default: `2`)
+- `URLSCAN_SUBMIT_TIMEOUT_SECONDS` (default: `20`)
+- `URLSCAN_INITIAL_WAIT_SECONDS` (default: `10`)
+- `URLSCAN_POLL_MAX_SECONDS` (default: `45`)
+- `URLSCAN_POLL_INTERVAL_SECONDS` (default: `2`)
+- `URLHAUS_AUTH_KEY` (optional but recommended)
+- `CUCKOO_BASE_URL` (default from registry)
+- `CUCKOO_API_TOKEN` (optional, if your Cuckoo/CAPE API is authenticated)
+- `CUCKOO_POLL_MAX_SECONDS` (default: `90`)
+- `CUCKOO_POLL_INTERVAL_SECONDS` (default: `5`)
+
+Current runtime note:
+- `cuckoo_url_detonate` adapter exists but is intentionally not invoked by default playbook execution until local sandbox infrastructure is enabled.
